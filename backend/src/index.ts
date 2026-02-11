@@ -14,6 +14,12 @@ import { verifyToken } from './middleware/auth.js';
 validateEnv();
 
 const isProd = process.env.NODE_ENV === 'production';
+const frontendUrl = (process.env.FRONTEND_URL || '').replace(/\/+$/, ''); // trim trailing slash
+const allowedOrigins = [
+  ...(frontendUrl ? [frontendUrl] : []),
+  ...(!isProd ? ['http://localhost:3000', 'http://localhost:3001'] : []),
+];
+console.log(`🌐 CORS allowed origins: ${allowedOrigins.length ? allowedOrigins.join(', ') : '(none — set FRONTEND_URL)'}`);
 
 // Import routes
 import authRoutes from './routes/auth.js';
@@ -41,9 +47,7 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: isProd
-      ? process.env.FRONTEND_URL || ''
-      : [process.env.FRONTEND_URL || 'http://localhost:3000', 'http://localhost:3000', 'http://localhost:3001'],
+    origin: allowedOrigins,
     methods: ['GET', 'POST'],
     credentials: true,
   },
@@ -54,17 +58,13 @@ if (isProd) app.set('trust proxy', 1); // Trust first proxy (nginx, LB)
 app.use(helmet());
 app.use(cors({
   origin: (origin, callback) => {
-    const allowed = [
-      process.env.FRONTEND_URL,
-      ...(!isProd ? ['http://localhost:3000', 'http://localhost:3001'] : []),
-    ].filter(Boolean);
     // Allow requests with no origin (mobile apps, curl, server-to-server)
     if (!origin) {
       callback(null, true);
-    } else if (allowed.includes(origin) || (!isProd && origin.startsWith('http://127.0.0.1'))) {
+    } else if (allowedOrigins.includes(origin) || (!isProd && origin.startsWith('http://127.0.0.1'))) {
       callback(null, true);
     } else {
-      console.warn(`CORS blocked origin: ${origin}. Allowed: ${allowed.join(', ')}`);
+      console.warn(`CORS blocked origin: ${origin}. Allowed: ${allowedOrigins.join(', ')}`);
       callback(null, false);
     }
   },
