@@ -277,7 +277,7 @@ export const aiProviderKeys = pgTable('ai_provider_keys', {
 });
 
 // Telephony Provider Configuration
-export const telephonyProviderEnum = pgEnum('telephony_provider', ['twilio', 'telnyx', 'vonage', 'signalwire', 'livekit_sip', 'vogent']);
+export const telephonyProviderEnum = pgEnum('telephony_provider', ['twilio', 'telnyx', 'vonage', 'signalwire', 'livekit_sip', 'vogent', 'dasha']);
 
 export const telephonyConfig = pgTable('telephony_config', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -303,6 +303,9 @@ export const telephonyConfig = pgTable('telephony_config', {
   vogentBaseAgentId: varchar('vogent_base_agent_id', { length: 255 }),
   vogentPhoneNumberId: varchar('vogent_phone_number_id', { length: 255 }),
   vogentDefaultModelId: varchar('vogent_default_model_id', { length: 255 }),
+  
+  // Dasha BlackBox specific
+  dashaAgentId: varchar('dasha_agent_id', { length: 255 }),
   
   isConfigured: boolean('is_configured').default(false),
   lastVerifiedAt: timestamp('last_verified_at'),

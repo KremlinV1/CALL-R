@@ -348,7 +348,7 @@ async function updateAgentEnvFile(provider: Provider, apiKey: string): Promise<v
 // TELEPHONY PROVIDER ROUTES
 // ============================================
 
-const TELEPHONY_PROVIDERS = ['twilio', 'telnyx', 'vonage', 'signalwire', 'livekit_sip', 'vogent'] as const;
+const TELEPHONY_PROVIDERS = ['twilio', 'telnyx', 'vonage', 'signalwire', 'livekit_sip', 'vogent', 'dasha'] as const;
 type TelephonyProvider = typeof TELEPHONY_PROVIDERS[number];
 
 interface TelephonyConfigRequest {
@@ -362,6 +362,8 @@ interface TelephonyConfigRequest {
   vogentBaseAgentId?: string;
   vogentPhoneNumberId?: string;
   vogentDefaultModelId?: string;
+  // Dasha specific
+  dashaAgentId?: string;
 }
 
 // GET /api/settings/telephony - Get telephony configuration
@@ -383,6 +385,7 @@ router.get('/telephony', async (req: Request, res: Response) => {
         vogentBaseAgentId: telephonyConfig.vogentBaseAgentId,
         vogentPhoneNumberId: telephonyConfig.vogentPhoneNumberId,
         vogentDefaultModelId: telephonyConfig.vogentDefaultModelId,
+        dashaAgentId: telephonyConfig.dashaAgentId,
         isConfigured: telephonyConfig.isConfigured,
         lastVerifiedAt: telephonyConfig.lastVerifiedAt,
         updatedAt: telephonyConfig.updatedAt,
@@ -410,6 +413,7 @@ router.get('/telephony', async (req: Request, res: Response) => {
       vogentBaseAgentId: config[0].vogentBaseAgentId,
       vogentPhoneNumberId: config[0].vogentPhoneNumberId,
       vogentDefaultModelId: config[0].vogentDefaultModelId,
+      dashaAgentId: config[0].dashaAgentId,
       lastVerifiedAt: config[0].lastVerifiedAt,
       updatedAt: config[0].updatedAt,
     });
@@ -423,7 +427,7 @@ router.get('/telephony', async (req: Request, res: Response) => {
 router.post('/telephony', async (req: Request, res: Response) => {
   try {
     const organizationId = (req as any).user?.organizationId;
-    const { provider, accountSid, authToken, apiKey, sipUri, spaceUrl, vogentBaseAgentId, vogentPhoneNumberId, vogentDefaultModelId } = req.body as TelephonyConfigRequest;
+    const { provider, accountSid, authToken, apiKey, sipUri, spaceUrl, vogentBaseAgentId, vogentPhoneNumberId, vogentDefaultModelId, dashaAgentId } = req.body as TelephonyConfigRequest;
 
     if (!organizationId) {
       return res.status(401).json({ error: 'Unauthorized' });
@@ -453,6 +457,10 @@ router.post('/telephony', async (req: Request, res: Response) => {
     } else if (provider === 'vogent') {
       if (!apiKey) {
         return res.status(400).json({ error: 'API Key is required for Vogent' });
+      }
+    } else if (provider === 'dasha') {
+      if (!apiKey) {
+        return res.status(400).json({ error: 'API Key is required for Dasha' });
       }
     }
 
@@ -488,6 +496,7 @@ router.post('/telephony', async (req: Request, res: Response) => {
           vogentBaseAgentId: vogentBaseAgentId || null,
           vogentPhoneNumberId: vogentPhoneNumberId || null,
           vogentDefaultModelId: vogentDefaultModelId || null,
+          dashaAgentId: dashaAgentId || null,
           isConfigured: true,
           updatedAt: new Date(),
         })
@@ -507,6 +516,7 @@ router.post('/telephony', async (req: Request, res: Response) => {
         vogentBaseAgentId: vogentBaseAgentId || null,
         vogentPhoneNumberId: vogentPhoneNumberId || null,
         vogentDefaultModelId: vogentDefaultModelId || null,
+        dashaAgentId: dashaAgentId || null,
         isConfigured: true,
       });
     }
@@ -620,6 +630,13 @@ async function verifyTelephonyCredentials(
         });
         return vogentRes.ok;
 
+      case 'dasha':
+        // Verify Dasha API key by listing agents
+        const dashaRes = await fetch('https://blackbox.dasha.ai/api/v1/agents?skip=0&take=1', {
+          headers: { 'Authorization': `Bearer ${credentials.apiKey}` }
+        });
+        return dashaRes.ok;
+
       default:
         return false;
     }
@@ -669,6 +686,9 @@ async function updateTelephonyEnvFile(
         break;
       case 'vogent':
         updates['VOGENT_API_KEY'] = credentials.apiKey;
+        break;
+      case 'dasha':
+        updates['DASHA_API_KEY'] = credentials.apiKey;
         break;
     }
 

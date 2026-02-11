@@ -6,6 +6,7 @@ import { eq, and, desc, gte, lte, sql, or, ilike } from 'drizzle-orm';
 import crypto from 'crypto';
 import { OutcomeDecisionEngine } from '../services/outcomeDecisionEngine.js';
 import { vogentService } from '../services/vogent.js';
+import { dashaService } from '../services/dasha.js';
 import { decryptApiKey } from '../utils/crypto.js';
 
 const router = Router();
@@ -28,6 +29,9 @@ const VOGENT_PHONE_NUMBER_ID_ENV = process.env.VOGENT_PHONE_NUMBER_ID;
 const VOGENT_PHONE_NUMBER_ENV = process.env.VOGENT_PHONE_NUMBER || '';
 const VOGENT_DEFAULT_MODEL_ID_ENV = process.env.VOGENT_DEFAULT_MODEL_ID || '';
 
+// Cache for auto-fetched Vogent model ID
+let cachedVogentModelId: string | null = null;
+
 // Load Vogent credentials from DB (per-org), falling back to env vars
 async function getVogentConfig(organizationId: string) {
   const config = await db
@@ -42,23 +46,124 @@ async function getVogentConfig(organizationId: string) {
     .where(eq(telephonyConfig.organizationId, organizationId))
     .limit(1);
 
+  let result;
   if (config.length > 0 && config[0].provider === 'vogent' && config[0].encryptedApiKey) {
     const apiKey = decryptApiKey(config[0].encryptedApiKey);
-    return {
+    result = {
       apiKey,
       baseAgentId: config[0].vogentBaseAgentId || VOGENT_BASE_AGENT_ID_ENV || '',
       phoneNumberId: config[0].vogentPhoneNumberId || VOGENT_PHONE_NUMBER_ID_ENV || '',
       defaultModelId: config[0].vogentDefaultModelId || VOGENT_DEFAULT_MODEL_ID_ENV || '',
     };
+  } else {
+    // Fallback to env vars
+    result = {
+      apiKey: VOGENT_API_KEY_ENV || '',
+      baseAgentId: VOGENT_BASE_AGENT_ID_ENV || '',
+      phoneNumberId: VOGENT_PHONE_NUMBER_ID_ENV || '',
+      defaultModelId: VOGENT_DEFAULT_MODEL_ID_ENV || '',
+    };
+  }
+
+  // Auto-fetch model ID from Vogent API if not configured
+  if (!result.defaultModelId && result.apiKey) {
+    if (cachedVogentModelId) {
+      result.defaultModelId = cachedVogentModelId;
+    } else {
+      try {
+        vogentService.configure(result.apiKey);
+        const models = await vogentService.listModels();
+        const modelList = models.data || [];
+        if (modelList.length > 0) {
+          cachedVogentModelId = modelList[0].id;
+          result.defaultModelId = cachedVogentModelId;
+          console.log(`🤖 Auto-fetched Vogent model ID: ${cachedVogentModelId} (${modelList[0].name})`);
+        } else {
+          console.warn('⚠️ No Vogent models found — prompt overrides may not work');
+        }
+      } catch (e: any) {
+        console.error('⚠️ Failed to auto-fetch Vogent model ID:', e.message);
+      }
+    }
+  }
+
+  return result;
+}
+
+// Dasha env-var fallbacks
+const DASHA_API_KEY_ENV = process.env.DASHA_API_KEY || '';
+const DASHA_AGENT_ID_ENV = process.env.DASHA_AGENT_ID || '';
+
+// Cache for auto-created Dasha agent ID
+let cachedDashaAgentId: string | null = null;
+
+// Load Dasha credentials from DB (per-org), falling back to env vars
+async function getDashaConfig(organizationId: string) {
+  const config = await db
+    .select({
+      encryptedApiKey: telephonyConfig.encryptedApiKey,
+      dashaAgentId: telephonyConfig.dashaAgentId,
+      provider: telephonyConfig.provider,
+    })
+    .from(telephonyConfig)
+    .where(eq(telephonyConfig.organizationId, organizationId))
+    .limit(1);
+
+  if (config.length > 0 && config[0].provider === 'dasha' && config[0].encryptedApiKey) {
+    const apiKey = decryptApiKey(config[0].encryptedApiKey);
+    return {
+      apiKey,
+      dashaAgentId: config[0].dashaAgentId || DASHA_AGENT_ID_ENV || '',
+    };
   }
 
   // Fallback to env vars
   return {
-    apiKey: VOGENT_API_KEY_ENV || '',
-    baseAgentId: VOGENT_BASE_AGENT_ID_ENV || '',
-    phoneNumberId: VOGENT_PHONE_NUMBER_ID_ENV || '',
-    defaultModelId: VOGENT_DEFAULT_MODEL_ID_ENV || '',
+    apiKey: DASHA_API_KEY_ENV,
+    dashaAgentId: DASHA_AGENT_ID_ENV,
   };
+}
+
+// Ensure a Dasha agent exists for the given local agent — creates one if needed
+async function ensureDashaAgent(
+  localAgent: any,
+  dashaCfg: { apiKey: string; dashaAgentId: string },
+  organizationId: string
+): Promise<string> {
+  // If we already have a Dasha agent ID, verify it exists
+  if (dashaCfg.dashaAgentId) {
+    try {
+      await dashaService.getAgent(dashaCfg.dashaAgentId);
+      return dashaCfg.dashaAgentId;
+    } catch {
+      console.log('⚠️ Stored Dasha agent ID invalid, will create new one');
+    }
+  }
+
+  if (cachedDashaAgentId) {
+    return cachedDashaAgentId;
+  }
+
+  // Create a new Dasha agent from the local agent config
+  const webhookBaseUrl = process.env.API_URL || `http://localhost:${process.env.PORT || 4000}`;
+  const agentConfig = dashaService.buildDashaAgentConfig(localAgent, webhookBaseUrl);
+
+  console.log('🤖 Creating Dasha agent:', agentConfig.name);
+  const dashaAgent = await dashaService.createAgent(agentConfig);
+  console.log('✅ Dasha agent created:', dashaAgent.agentId);
+
+  cachedDashaAgentId = dashaAgent.agentId;
+
+  // Store the Dasha agent ID in the DB for future use
+  try {
+    await db.update(telephonyConfig)
+      .set({ dashaAgentId: dashaAgent.agentId })
+      .where(eq(telephonyConfig.organizationId, organizationId));
+  } catch (e: any) {
+    console.log('⚠️ Could not persist Dasha agent ID to DB:', e.message);
+  }
+
+  return dashaAgent.agentId;
 }
 
 // Helper to create LiveKit API client
@@ -385,16 +490,21 @@ router.post('/outbound', async (req: AuthRequest, res: Response) => {
     
     const agent = agentResult[0];
     
-    // Determine which provider to use — check per-org DB config first, then env vars
+    // Determine which provider to use — check Dasha first, then Vogent, then LiveKit
     let callProvider = requestedProvider || '';
     if (!callProvider) {
-      const vogentCfg = await getVogentConfig(organizationId);
-      if (vogentCfg.apiKey && vogentCfg.baseAgentId) {
-        callProvider = 'vogent';
-      } else if (LIVEKIT_URL && LIVEKIT_API_KEY) {
-        callProvider = 'livekit';
+      const dashaCfg = await getDashaConfig(organizationId);
+      if (dashaCfg.apiKey) {
+        callProvider = 'dasha';
       } else {
-        return res.status(400).json({ error: 'No telephony provider configured. Go to Settings > Telephony to set up Vogent or LiveKit.' });
+        const vogentCfg = await getVogentConfig(organizationId);
+        if (vogentCfg.apiKey && vogentCfg.baseAgentId) {
+          callProvider = 'vogent';
+        } else if (LIVEKIT_URL && LIVEKIT_API_KEY) {
+          callProvider = 'livekit';
+        } else {
+          return res.status(400).json({ error: 'No telephony provider configured. Go to Settings > Telephony to set up Dasha, Vogent, or LiveKit.' });
+        }
       }
     }
     
@@ -448,8 +558,80 @@ router.post('/outbound', async (req: AuthRequest, res: Response) => {
       },
     }).returning();
 
+    // ── Dasha provider ───────────────────────────────────
+    if (callProvider === 'dasha') {
+      try {
+        const dashaCfg = await getDashaConfig(organizationId);
+        if (!dashaCfg.apiKey) {
+          throw new Error('Dasha not configured — missing API key. Go to Settings > Telephony.');
+        }
+
+        dashaService.configure(dashaCfg.apiKey);
+        console.log('📞 Dasha: Scheduling call to', formattedToNumber);
+
+        // Ensure a Dasha agent exists (creates one if needed)
+        const dashaAgentId = await ensureDashaAgent(agent, dashaCfg, organizationId);
+
+        // Build per-call additionalData for variable interpolation
+        const additionalData: Record<string, string> = {};
+        if (contactId) {
+          const contactResult = await db.select().from(contacts).where(eq(contacts.id, contactId)).limit(1);
+          if (contactResult.length > 0) {
+            const c = contactResult[0];
+            additionalData.first_name = c.firstName || '';
+            additionalData.last_name = c.lastName || '';
+            additionalData.company_name = c.company || '';
+            additionalData.company = c.company || '';
+            additionalData.phone = c.phone || '';
+            additionalData.email = c.email || '';
+          }
+        }
+
+        // Also store our internal IDs for webhook correlation
+        additionalData._callId = newCall.id;
+        additionalData._campaignId = (req.body.campaignId || '') as string;
+        additionalData._contactId = (contactId || '') as string;
+
+        // Schedule the call on Dasha
+        const dashaCall = await dashaService.scheduleCall(
+          dashaAgentId,
+          formattedToNumber,
+          5, // default priority
+          additionalData
+        );
+
+        console.log('✅ Dasha call scheduled:', dashaCall.callId, 'status:', dashaCall.status);
+
+        // Store the Dasha call ID on the call record
+        await db.update(calls)
+          .set({
+            externalId: dashaCall.callId,
+            status: 'ringing',
+            startedAt: new Date(),
+            metadata: {
+              ...(newCall.metadata as object),
+              dashaCallId: dashaCall.callId,
+              dashaAgentId,
+              campaignId: req.body.campaignId || null,
+              contactId: contactId || null,
+            },
+          })
+          .where(eq(calls.id, newCall.id));
+      } catch (dashaError: any) {
+        console.error('❌ Dasha error:', dashaError?.response?.data || dashaError.message);
+        await db.update(calls)
+          .set({
+            status: 'failed',
+            metadata: {
+              ...(newCall.metadata as object),
+              error: String(dashaError?.response?.data?.message || dashaError.message),
+            },
+          })
+          .where(eq(calls.id, newCall.id));
+      }
+    }
     // ── Vogent provider ──────────────────────────────────
-    if (callProvider === 'vogent') {
+    else if (callProvider === 'vogent') {
       try {
         // Load credentials from DB (per-org) with env var fallback
         const vogentCfg = await getVogentConfig(organizationId);

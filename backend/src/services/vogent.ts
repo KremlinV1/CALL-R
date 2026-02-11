@@ -357,6 +357,27 @@ IMPORTANT: Do NOT give out the transfer phone numbers directly. Always use the t
       }
     }
 
+    // Inject IVR navigation instructions if enabled
+    const ivrConfig = this.extractIvrConfig(agent);
+    if (ivrConfig.enabled) {
+      prompt += `\n\n## IVR / PHONE MENU NAVIGATION INSTRUCTIONS
+When you encounter an automated phone system (IVR), interactive voice response, or phone menu:
+
+1. LISTEN carefully to all the menu options before responding.
+2. To select a menu option, clearly SAY the digit number (e.g., say "one" for option 1, "two" for option 2). Do NOT say "press one" — just say the number clearly.
+3. If asked to enter an extension or account number, say each digit individually with brief pauses (e.g., "one... two... three... four").
+4. If the system says "press pound" or "press star", say "pound" or "star" respectively.
+5. If you hear "please hold" or hold music, wait silently until a person or new menu appears.
+6. If asked to state your name or reason for calling, respond naturally.
+7. If you reach a human operator, proceed with your normal conversation instructions.
+${ivrConfig.targetOption ? `\nPREFERRED NAVIGATION: ${ivrConfig.targetOption}` : ''}
+CRITICAL IVR RULES:
+- NEVER narrate what you are doing (don't say "I'm going to press 1" — just say "one").
+- Be patient — IVR systems may have delays between prompts.
+- If the menu repeats, try the option again. If stuck after 3 attempts, try saying "operator" or "representative" or "zero" to reach a human.
+- Stay silent during hold music or "please wait" messages.`;
+    }
+
     // Inject voicemail handling instructions if enabled
     const vmConfig = this.extractVoicemailConfig(agent);
     if (vmConfig.enabled && vmConfig.leaveMessage) {
@@ -494,6 +515,25 @@ If you detect that the call has gone to voicemail (you hear an automated greetin
     }
 
     return { enabled: false, leaveMessage: false, message: defaultMessage };
+  }
+
+  /**
+   * Extract IVR navigation configuration from agent actions.
+   * Stored in the actions jsonb array as { type: 'ivrNavigation', enabled: true, config: { targetOption: '...' } }
+   */
+  extractIvrConfig(agent: {
+    actions?: any;
+  }): { enabled: boolean; targetOption: string } {
+    if (Array.isArray(agent.actions)) {
+      const ivrAction = agent.actions.find((a: any) => a.type === 'ivrNavigation' && a.enabled);
+      if (ivrAction) {
+        return {
+          enabled: true,
+          targetOption: ivrAction.config?.targetOption || '',
+        };
+      }
+    }
+    return { enabled: false, targetOption: '' };
   }
 
   /**

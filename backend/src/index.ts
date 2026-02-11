@@ -35,6 +35,7 @@ import phoneNumbersRoutes from './routes/phoneNumbers.js';
 import livekitRoutes from './routes/livekit.js';
 import voiceRoutes from './routes/voice.js';
 import vogentRoutes from './routes/vogent.js';
+import dashaWebhookRoutes from './routes/webhooks/dasha.js';
 import { campaignExecutor } from './services/campaignExecutor.js';
 import { vogentDialPoller } from './services/vogentDialPoller.js';
 
@@ -82,6 +83,7 @@ app.get('/health', (req, res) => {
 // Public routes
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/vogent', vogentRoutes); // Webhook endpoint is public; other routes check auth internally
+app.use('/api/webhooks/dasha', dashaWebhookRoutes); // Dasha webhook endpoint is public
 
 // Protected routes
 app.use('/api/agents', authMiddleware, agentsRoutes);

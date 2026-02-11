@@ -54,6 +54,9 @@ export interface CreateAgentData {
     followUpBody?: string;
     sendAfterCall?: boolean;
   };
+  ivrConfig?: {
+    targetOption?: string;
+  };
   variables?: { id: string; name: string; csvColumn: string; defaultValue: string }[];
 }
 

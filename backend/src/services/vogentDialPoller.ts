@@ -1,6 +1,6 @@
 import { db } from '../db/index.js';
-import { calls, telephonyConfig } from '../db/schema.js';
-import { eq, and, inArray } from 'drizzle-orm';
+import { calls, telephonyConfig, campaignContacts, campaigns } from '../db/schema.js';
+import { eq, and, inArray, sql } from 'drizzle-orm';
 import { vogentService } from './vogent.js';
 import { decryptApiKey } from '../utils/crypto.js';
 
@@ -197,9 +197,105 @@ class VogentDialPoller {
     const isTerminal = ['completed', 'failed', 'voicemail', 'busy', 'no_answer'].includes(updateData.status);
     if (isTerminal) {
       console.log(`✅ Vogent call ${call.id} synced → ${updateData.status} (${updateData.durationSeconds || 0}s)`);
+
+      // Update campaign stats if this call belongs to a campaign
+      await this.updateCampaignStats(call.id, updateData.status);
     }
 
     return updatedCall;
+  }
+  /**
+   * Update campaign contact status and aggregate campaign counters
+   * when a call reaches a terminal state.
+   */
+  private async updateCampaignStats(callId: string, callStatus: string) {
+    try {
+      // Get the call to find campaignId and contactId
+      const [call] = await db.select({
+        campaignId: calls.campaignId,
+        contactId: calls.contactId,
+      }).from(calls).where(eq(calls.id, callId)).limit(1);
+
+      if (!call?.campaignId) return; // Not a campaign call
+
+      // Map call status to campaign contact result
+      let contactStatus = 'completed';
+      let contactResult = callStatus;
+      if (['failed', 'busy', 'no_answer'].includes(callStatus)) {
+        contactStatus = 'failed';
+      } else if (callStatus === 'voicemail') {
+        contactStatus = 'completed';
+        contactResult = 'voicemail';
+      }
+
+      // Update campaign contact
+      if (call.contactId) {
+        await db.update(campaignContacts)
+          .set({
+            status: contactStatus,
+            result: contactResult,
+            completedAt: new Date(),
+          })
+          .where(and(
+            eq(campaignContacts.campaignId, call.campaignId),
+            eq(campaignContacts.contactId, call.contactId)
+          ));
+      }
+
+      // Update campaign aggregate counters
+      const counterField = callStatus === 'completed' ? 'connectedCalls'
+        : callStatus === 'voicemail' ? 'voicemailCalls'
+        : callStatus === 'failed' || callStatus === 'busy' || callStatus === 'no_answer' ? 'failedCalls'
+        : 'completedCalls';
+
+      // Always increment completedCalls (total finished) and the specific counter
+      const updates: Record<string, any> = {
+        completedCalls: sql`${campaigns.completedCalls} + 1`,
+        updatedAt: new Date(),
+      };
+      if (counterField === 'connectedCalls') {
+        updates.connectedCalls = sql`${campaigns.connectedCalls} + 1`;
+      } else if (counterField === 'voicemailCalls') {
+        updates.voicemailCalls = sql`${campaigns.voicemailCalls} + 1`;
+      } else if (counterField === 'failedCalls') {
+        updates.failedCalls = sql`${campaigns.failedCalls} + 1`;
+      }
+
+      await db.update(campaigns)
+        .set(updates)
+        .where(eq(campaigns.id, call.campaignId));
+
+      console.log(`📊 Campaign ${call.campaignId} stats updated: ${callStatus}`);
+
+      // Emit socket event for real-time campaign UI
+      if (this.io) {
+        this.io.emit('campaign:stats_updated', {
+          campaignId: call.campaignId,
+          callStatus,
+        });
+      }
+
+      // Check if all contacts are done → mark campaign completed
+      const pendingContacts = await db.select({ id: campaignContacts.id })
+        .from(campaignContacts)
+        .where(and(
+          eq(campaignContacts.campaignId, call.campaignId),
+          inArray(campaignContacts.status, ['pending', 'in_progress'])
+        ))
+        .limit(1);
+
+      if (pendingContacts.length === 0) {
+        await db.update(campaigns)
+          .set({ status: 'completed', completedAt: new Date() })
+          .where(eq(campaigns.id, call.campaignId));
+        console.log(`✅ Campaign ${call.campaignId} completed — all contacts done`);
+        if (this.io) {
+          this.io.emit('campaign:completed', { campaignId: call.campaignId });
+        }
+      }
+    } catch (err) {
+      console.error('❌ Error updating campaign stats:', err);
+    }
   }
 }
 

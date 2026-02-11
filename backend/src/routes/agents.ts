@@ -26,6 +26,7 @@ const createAgentSchema = z.object({
     sendEmail: z.boolean().default(false),
     endCall: z.boolean().default(true),
     leaveVoicemail: z.boolean().default(false),
+    ivrNavigation: z.boolean().default(false),
   }).optional(),
   transferConfig: z.object({
     enabled: z.boolean().default(false),
@@ -50,6 +51,9 @@ const createAgentSchema = z.object({
     followUpSubject: z.string().optional(),
     followUpBody: z.string().optional(),
     sendAfterCall: z.boolean().default(false),
+  }).optional(),
+  ivrConfig: z.object({
+    targetOption: z.string().optional(),
   }).optional(),
   variables: z.array(z.object({
     id: z.string(),
@@ -111,6 +115,7 @@ router.post('/', async (req: AuthRequest, res: Response) => {
         ...(key === 'leaveVoicemail' && data.voicemailConfig ? { config: data.voicemailConfig } : {}),
         ...(key === 'sendSms' && data.smsConfig ? { config: data.smsConfig } : {}),
         ...(key === 'sendEmail' && data.emailConfig ? { config: data.emailConfig } : {}),
+        ...(key === 'ivrNavigation' && data.ivrConfig ? { config: data.ivrConfig } : {}),
       })) : [];
 
     const [agent] = await db.insert(agents).values({
@@ -174,6 +179,7 @@ router.put('/:id', async (req: AuthRequest, res: Response) => {
         ...(key === 'leaveVoicemail' && data.voicemailConfig ? { config: data.voicemailConfig } : {}),
         ...(key === 'sendSms' && data.smsConfig ? { config: data.smsConfig } : {}),
         ...(key === 'sendEmail' && data.emailConfig ? { config: data.emailConfig } : {}),
+        ...(key === 'ivrNavigation' && data.ivrConfig ? { config: data.ivrConfig } : {}),
       })) : [];
 
     const [agent] = await db.update(agents)

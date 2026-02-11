@@ -53,6 +53,7 @@ import {
   Coffee,
   Users,
   Pause,
+  Hash,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useCreateAgent, useUpdateAgent } from "@/hooks/use-agents"
@@ -106,6 +107,10 @@ interface EmailConfig {
   sendAfterCall: boolean
 }
 
+interface IvrConfig {
+  targetOption: string
+}
+
 interface AgentConfig {
   // Basic
   name: string
@@ -157,6 +162,9 @@ interface AgentConfig {
   
   // Email Configuration
   emailConfig: EmailConfig
+
+  // IVR Navigation Configuration
+  ivrConfig: IvrConfig
   
   // Actions
   actions: {
@@ -166,6 +174,7 @@ interface AgentConfig {
     sendEmail: boolean
     endCall: boolean
     leaveVoicemail: boolean
+    ivrNavigation: boolean
   }
 }
 
@@ -379,6 +388,9 @@ export function AgentBuilderWizard({ open, onOpenChange, agent: editAgent }: Age
       followUpBody: "Hi {{first_name}},\n\nThank you for taking the time to speak with us today. We appreciate your interest in {{company_name}}.\n\nPlease don't hesitate to reach out if you have any questions.\n\nBest regards,\n{{company_name}}",
       sendAfterCall: false,
     },
+    ivrConfig: {
+      targetOption: "",
+    },
     actions: {
       transferCall: true,
       bookAppointment: true,
@@ -386,6 +398,7 @@ export function AgentBuilderWizard({ open, onOpenChange, agent: editAgent }: Age
       sendEmail: false,
       endCall: true,
       leaveVoicemail: true,
+      ivrNavigation: false,
     },
   })
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null)
@@ -417,6 +430,7 @@ export function AgentBuilderWizard({ open, onOpenChange, agent: editAgent }: Age
       const smsCfg = getActionConfig("sendSms")
       const emailCfg = getActionConfig("sendEmail")
       const transferCfg = getActionConfig("transferCall")
+      const ivrCfg = getActionConfig("ivrNavigation")
 
       setConfig({
         name: editAgent.name || "",
@@ -462,6 +476,9 @@ export function AgentBuilderWizard({ open, onOpenChange, agent: editAgent }: Age
           followUpBody: emailCfg?.followUpBody || "",
           sendAfterCall: emailCfg?.sendAfterCall ?? false,
         },
+        ivrConfig: {
+          targetOption: ivrCfg?.targetOption || "",
+        },
         actions: {
           transferCall: isActionEnabled("transferCall"),
           bookAppointment: isActionEnabled("bookAppointment"),
@@ -469,6 +486,7 @@ export function AgentBuilderWizard({ open, onOpenChange, agent: editAgent }: Age
           sendEmail: isActionEnabled("sendEmail"),
           endCall: isActionEnabled("endCall"),
           leaveVoicemail: isActionEnabled("leaveVoicemail"),
+          ivrNavigation: isActionEnabled("ivrNavigation"),
         },
       })
       setCurrentStep(0)
@@ -521,6 +539,7 @@ export function AgentBuilderWizard({ open, onOpenChange, agent: editAgent }: Age
       voicemailConfig: config.voicemailConfig,
       smsConfig: config.smsConfig,
       emailConfig: config.emailConfig,
+      ivrConfig: config.ivrConfig,
       variables: config.variables,
     }
 
@@ -568,6 +587,9 @@ export function AgentBuilderWizard({ open, onOpenChange, agent: editAgent }: Age
         followUpBody: "Hi {{first_name}},\n\nThank you for taking the time to speak with us today.\n\nBest regards,\n{{company_name}}",
         sendAfterCall: false,
       },
+      ivrConfig: {
+        targetOption: "",
+      },
       actions: {
         transferCall: true,
         bookAppointment: true,
@@ -575,6 +597,7 @@ export function AgentBuilderWizard({ open, onOpenChange, agent: editAgent }: Age
         sendEmail: false,
         endCall: true,
         leaveVoicemail: true,
+        ivrNavigation: false,
       },
     })
     onOpenChange(false)
@@ -1508,6 +1531,7 @@ function ActionsStep({
     { id: "sendSms", label: "Send SMS", description: "Send follow-up text messages", icon: MessageSquare },
     { id: "sendEmail", label: "Send Email", description: "Send confirmation or follow-up emails", icon: Send },
     { id: "bookAppointment", label: "Book Appointment", description: "Schedule appointments in connected calendar", icon: Calendar },
+    { id: "ivrNavigation", label: "IVR Navigation", description: "Navigate automated phone menus and voicemail systems", icon: Hash },
     { id: "endCall", label: "End Call", description: "Gracefully end the conversation", icon: X },
   ] as const
 
@@ -1853,6 +1877,37 @@ function ActionsStep({
                       <strong>How it works:</strong> The AI will ask the caller for their preferred date and time, 
                       check availability (when calendar is connected), and confirm the booking. The appointment 
                       details are saved in the call summary.
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* IVR Navigation Configuration */}
+              {action.id === "ivrNavigation" && isEnabled && (
+                <Card className="ml-6 border-dashed">
+                  <CardContent className="p-4 space-y-4">
+                    <h4 className="font-medium text-sm">IVR Navigation Settings</h4>
+
+                    <div className="space-y-2">
+                      <Label className="text-xs">Target Navigation (Optional)</Label>
+                      <Textarea
+                        placeholder="e.g., Select option 2 for Sales, then option 1 for New Accounts"
+                        value={config.ivrConfig.targetOption}
+                        onChange={(e) => updateConfig("ivrConfig", {
+                          ...config.ivrConfig,
+                          targetOption: e.target.value
+                        })}
+                        onClick={(e) => e.stopPropagation()}
+                        rows={2}
+                        className="text-sm"
+                      />
+                      <p className="text-xs text-muted-foreground">Tell the AI which menu options to select when navigating a phone tree</p>
+                    </div>
+
+                    <div className="text-xs text-muted-foreground bg-blue-500/10 border border-blue-500/20 rounded p-2">
+                      <strong>How it works:</strong> When the AI encounters an automated phone system (IVR), it will listen 
+                      to the menu options and speak the digit selections clearly. It can navigate multi-level phone trees, 
+                      enter extensions, and wait through hold music until reaching a human.
                     </div>
                   </CardContent>
                 </Card>
