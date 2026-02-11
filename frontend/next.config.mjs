@@ -1,5 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Ignore ESLint errors during build (lint separately in CI)
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+
   // Security headers
   async headers() {
     return [
