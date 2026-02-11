@@ -1,0 +1,397 @@
+{
+  "meta": {
+    "project": "Pon E Line",
+    "date": "2025-12-10",
+    "prepared_by": "Product Manager"
+  },
+  "product_overview": "Pon E Line is an enterprise voice AI platform leveraging LiveKit Agents technology to deliver advanced voice AI capabilities including AI voice agents, batch calling campaigns, real-time call management, and comprehensive analytics, designed for scalable enterprise usage.",
+  "core_goals": [
+    "Enable seamless user authentication and secure access management via JWT tokens and role-based access control.",
+    "Provide full CRUD capabilities for AI voice agents with dynamic voice configuration and versioning.",
+    "Support contact management with bulk CSV import and detailed contact analytics.",
+    "Facilitate outbound and inbound call handling through LiveKit SIP integration including call recording and real-time monitoring.",
+    "Enable robust batch calling campaigns with detailed monitoring, scheduling, and result analytics.",
+    "Implement advanced voice AI features such as voicemail detection, call transfer systems, and multi-agent workflows.",
+    "Integrate with major CRM and calendar platforms to streamline workflows.",
+    "Deliver comprehensive analytics including AI-powered call summarization, sentiment analysis, and quality scoring.",
+    "Ensure high reliability, security, and compliance including PCI DSS, HIPAA, GDPR, and SOC 2 readiness.",
+    "Support white-labeling and multi-tenant capabilities for enterprise customization.",
+    "Prepare the product for a public beta launch with scalable infrastructure and more than 100 beta users onboarded."
+  ],
+  "key_features": [
+    "User Authentication with JWT, registration, login, session management, RBAC, password reset, and email verification.",
+    "Agents Management API and UI including creation, updating, deletion, voice settings, and agent testing playground.",
+    "Contacts Management with paginated list, search, bulk CSV import, and contact statistics.",
+    "Calls Management with outbound call initiation, call history tracking, recording, transcription, status updates, and real-time dashboard.",
+    "Campaigns Management supporting creation, contact assignment, start/pause controls, scheduling, rate limiting, retry logic, and performance analytics.",
+    "Voicemail Detection using Answering Machine Detection with static and dynamic TTS messages and voicemail logging.",
+    "Call Transfer functionality including cold/warm transfer, human detection, three-way calls, whisper messages, and IVR navigation.",
+    "Multi-Agent Workflows featuring agent handoff, conditional routing, escalation paths, context preservation, and workflow visualization UI.",
+    "Integrations with CRM platforms (Salesforce, HubSpot, Pipedrive) and calendar systems (Google, Outlook, Calendly), including OAuth and data mapping.",
+    "Visual IVR Builder for drag-and-drop flow creation, DTMF detection, menu navigation, and A/B testing.",
+    "Appointment Booking with availability checking, real-time slot booking, timezone handling, reminders, and syncing with calendars.",
+    "Communication integrations with Slack, Teams, Discord, Zapier, Make, and custom webhook systems.",
+    "Advanced Compliance including PCI DSS, HIPAA, GDPR support, encryption, audit logging, and automated redaction.",
+    "Voice Cloning with integrations to ElevenLabs, Cartesia, and Resemble AI along with voice training and versioning.",
+    "Real-time Coaching Dashboard with live call feeds, transcription, sentiment, and AI coaching suggestions.",
+    "White-labeling support with branding customization, tenant isolation, and custom domain routing.",
+    "Comprehensive analytics dashboards with KPI cards, export functionality, AI call summarization, sentiment visualization, and quality scoring."
+  ],
+  "user_flow_summary": [
+    "User registers and logs in through secure authentication; gains access based on role.",
+    "User creates and manages AI voice agents via intuitive UI; configures voice settings and tests agents.",
+    "User imports and manages contacts individually or in bulk (CSV); searches and filters contacts.",
+    "User initiates outbound calls or receives inbound calls; monitors call history and live call status.",
+    "User defines and launches batch calling campaigns; monitors progress in real-time and exports results.",
+    "User configures voicemail detection and handles detected voicemails with dynamic messages.",
+    "User manages call transfer scenarios including cold, warm, and three-way calls.",
+    "User creates multi-agent workflows and sets routing and escalation policies via drag-drop builder.",
+    "User connects and manages CRM and calendar integrations through OAuth flows and configures data mappings.",
+    "User builds IVR flows visually; tests and deploys IVR menus with DTMF and audio prompts.",
+    "User schedules appointments, manages availability, with reminders and calendar syncing.",
+    "Product administrators configure compliance settings; monitor audit logs and data retention.",
+    "Users access real-time coaching features including transcription and AI suggestions.",
+    "Enterprise users customize branding and tenant settings in white-label mode.",
+    "All users interact with analytics dashboards to review call, campaign, and AI analysis data."
+  ],
+  "validation_criteria": [
+    "Authentication APIs securely issue and validate JWT tokens; support role-based access control.",
+    "Agents management supports full CRUD with versioning and voice configuration validation.",
+    "Contacts CRUD and bulk CSV import handle large datasets with accurate filtering and pagination.",
+    "Calls APIs enable reliable call initiation, recording, transcription, and real-time status streaming.",
+    "Campaigns management handles scheduling, concurrent calls, duplicate avoidance, and accurate progress tracking.",
+    "Voicemail detection achieves 95%+ answer machine detection accuracy and correct message delivery.",
+    "Call transfer functionality supports cold/warm transfers, human detection, and IVR navigation without failures.",
+    "Multi-agent workflows execute routing and escalations correctly; workflows are testable and performant.",
+    "CRM and calendar integrations authenticate via OAuth and sync data bidirectionally without errors.",
+    "IVR builder allows drag-drop flow creation with functional DTMF and menu logic tested.",
+    "Appointment booking correctly manages availability, conflicts, timezones, and reminders.",
+    "Communication integrations deliver notifications and messages reliably across platforms.",
+    "Compliance features enforce PCI, HIPAA, GDPR policies with audit logs and automated redactions.",
+    "Voice cloning integrates reliably with third-party providers and supports training and usage tracking.",
+    "Real-time coaching shows accurate transcriptions, sentiment indicators, and AI prompts.",
+    "White-label functionality isolates tenants securely and supports custom branding and domains.",
+    "Analytics dashboards display accurate, real-time KPI data with data export and AI analysis functions.",
+    "System maintains 99.99% uptime and performance targets including <500ms call latency under load.",
+    "Test coverage exceeds 90% with all critical and major bugs resolved prior to launch.",
+    "Beta launch achieves onboarding of 100+ users with stable system performance and active feedback collection."
+  ],
+  "code_summary": {
+    "tech_stack": [
+      "TypeScript",
+      "Express.js",
+      "PostgreSQL",
+      "Drizzle ORM",
+      "LiveKit SDK",
+      "Socket.IO",
+      "JWT"
+    ],
+    "features": [
+      {
+        "name": "Authentication",
+        "description": "User authentication with JWT tokens, login, register, and session management",
+        "files": [
+          "src/routes/auth.ts",
+          "src/middleware/auth.ts"
+        ],
+        "api_doc": {
+          "openapi": "3.0.0",
+          "paths": {
+            "/api/auth/login": {
+              "post": {
+                "summary": "Login user",
+                "requestBody": {
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "email": {
+                            "type": "string"
+                          },
+                          "password": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "responses": {
+                  "200": {
+                    "description": "Login successful, returns JWT token"
+                  }
+                }
+              }
+            },
+            "/api/auth/register": {
+              "post": {
+                "summary": "Register new user",
+                "responses": {
+                  "201": {
+                    "description": "User created"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "Agents Management",
+        "description": "CRUD operations for AI voice agents",
+        "files": [
+          "src/routes/agents.ts"
+        ],
+        "api_doc": {
+          "openapi": "3.0.0",
+          "paths": {
+            "/api/agents": {
+              "get": {
+                "summary": "List all agents for organization",
+                "responses": {
+                  "200": {
+                    "description": "Returns array of agents"
+                  }
+                }
+              },
+              "post": {
+                "summary": "Create new agent",
+                "responses": {
+                  "201": {
+                    "description": "Agent created"
+                  }
+                }
+              }
+            },
+            "/api/agents/{id}": {
+              "get": {
+                "summary": "Get single agent",
+                "responses": {
+                  "200": {
+                    "description": "Returns agent details"
+                  }
+                }
+              },
+              "put": {
+                "summary": "Update agent",
+                "responses": {
+                  "200": {
+                    "description": "Agent updated"
+                  }
+                }
+              },
+              "delete": {
+                "summary": "Delete agent",
+                "responses": {
+                  "200": {
+                    "description": "Agent deleted"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "Contacts Management",
+        "description": "CRUD operations for contacts, bulk import via CSV",
+        "files": [
+          "src/routes/contacts.ts"
+        ],
+        "api_doc": {
+          "openapi": "3.0.0",
+          "paths": {
+            "/api/contacts": {
+              "get": {
+                "summary": "List contacts with pagination and filtering",
+                "parameters": [
+                  {
+                    "name": "page",
+                    "in": "query",
+                    "schema": {
+                      "type": "integer"
+                    }
+                  },
+                  {
+                    "name": "limit",
+                    "in": "query",
+                    "schema": {
+                      "type": "integer"
+                    }
+                  },
+                  {
+                    "name": "search",
+                    "in": "query",
+                    "schema": {
+                      "type": "string"
+                    }
+                  }
+                ],
+                "responses": {
+                  "200": {
+                    "description": "Returns paginated contacts"
+                  }
+                }
+              },
+              "post": {
+                "summary": "Create single contact",
+                "responses": {
+                  "201": {
+                    "description": "Contact created"
+                  }
+                }
+              }
+            },
+            "/api/contacts/bulk": {
+              "post": {
+                "summary": "Bulk create contacts from CSV",
+                "responses": {
+                  "201": {
+                    "description": "Contacts created"
+                  }
+                }
+              }
+            },
+            "/api/contacts/stats": {
+              "get": {
+                "summary": "Get contact statistics",
+                "responses": {
+                  "200": {
+                    "description": "Returns contact stats"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "Calls Management",
+        "description": "Initiate outbound calls via LiveKit SIP, track call history and status",
+        "files": [
+          "src/routes/calls.ts"
+        ],
+        "api_doc": {
+          "openapi": "3.0.0",
+          "paths": {
+            "/api/calls": {
+              "get": {
+                "summary": "List calls with filtering",
+                "responses": {
+                  "200": {
+                    "description": "Returns paginated calls"
+                  }
+                }
+              }
+            },
+            "/api/calls/outbound": {
+              "post": {
+                "summary": "Initiate outbound call",
+                "requestBody": {
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "agentId": {
+                            "type": "string"
+                          },
+                          "toNumber": {
+                            "type": "string"
+                          },
+                          "contactId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "agentId",
+                          "toNumber"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "responses": {
+                  "201": {
+                    "description": "Call initiated"
+                  }
+                }
+              }
+            },
+            "/api/calls/stats/summary": {
+              "get": {
+                "summary": "Get call statistics summary",
+                "responses": {
+                  "200": {
+                    "description": "Returns call stats"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "Campaigns Management",
+        "description": "Batch calling campaigns with contact assignment",
+        "files": [
+          "src/routes/campaigns.ts"
+        ],
+        "api_doc": {
+          "openapi": "3.0.0",
+          "paths": {
+            "/api/campaigns": {
+              "get": {
+                "summary": "List campaigns",
+                "responses": {
+                  "200": {
+                    "description": "Returns campaigns"
+                  }
+                }
+              },
+              "post": {
+                "summary": "Create campaign",
+                "responses": {
+                  "201": {
+                    "description": "Campaign created"
+                  }
+                }
+              }
+            },
+            "/api/campaigns/{id}/contacts": {
+              "post": {
+                "summary": "Add contacts to campaign",
+                "responses": {
+                  "200": {
+                    "description": "Contacts added"
+                  }
+                }
+              }
+            },
+            "/api/campaigns/{id}/start": {
+              "post": {
+                "summary": "Start campaign",
+                "responses": {
+                  "200": {
+                    "description": "Campaign started"
+                  }
+                }
+              }
+            },
+            "/api/campaigns/{id}/pause": {
+              "post": {
+                "summary": "Pause campaign",
+                "responses": {
+                  "200": {
+                    "description": "Campaign paused"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+}

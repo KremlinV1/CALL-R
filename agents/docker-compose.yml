@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  # LiveKit Server (development only)
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --dev --bind 0.0.0.0
+    ports:
+      - "7880:7880"  # WebSocket
+      - "7881:7881"  # HTTP API
+      - "50100-50200:50100-50200/udp"  # WebRTC UDP
+    environment:
+      - LIVEKIT_KEYS=devkey:secret
+    networks:
+      - pon-e-line
+
+  # Voice Agent
+  agent:
+    build: .
+    depends_on:
+      - livekit
+    environment:
+      - LIVEKIT_URL=ws://livekit:7880
+      - LIVEKIT_API_KEY=devkey
+      - LIVEKIT_API_SECRET=secret
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - CARTESIA_API_KEY=${CARTESIA_API_KEY}
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
+    networks:
+      - pon-e-line
+    restart: unless-stopped
+
+  # Redis for agent coordination (optional)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - pon-e-line
+    volumes:
+      - redis-data:/data
+
+networks:
+  pon-e-line:
+    driver: bridge
+
+volumes:
+  redis-data:

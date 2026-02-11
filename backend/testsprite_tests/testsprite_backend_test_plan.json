@@ -1,0 +1,52 @@
+[
+  {
+    "id": "TC001",
+    "title": "test user login with valid credentials",
+    "description": "Verify that the /api/auth/login endpoint successfully authenticates a user with valid email and password, returning a JWT token and a 200 status code."
+  },
+  {
+    "id": "TC002",
+    "title": "test user registration with valid data",
+    "description": "Verify that the /api/auth/register endpoint creates a new user when provided with valid registration data, returning a 201 status code."
+  },
+  {
+    "id": "TC003",
+    "title": "test create new agent",
+    "description": "Verify that the /api/agents POST endpoint creates a new AI voice agent with valid input data and returns a 201 status code."
+  },
+  {
+    "id": "TC004",
+    "title": "test update existing agent",
+    "description": "Verify that the /api/agents/{id} PUT endpoint updates an existing AI voice agent's details correctly and returns a 200 status code."
+  },
+  {
+    "id": "TC005",
+    "title": "test delete agent by id",
+    "description": "Verify that the /api/agents/{id} DELETE endpoint deletes the specified AI voice agent and returns a 200 status code."
+  },
+  {
+    "id": "TC006",
+    "title": "test list contacts with pagination and search",
+    "description": "Verify that the /api/contacts GET endpoint returns a paginated list of contacts filtered by search query parameters, with a 200 status code."
+  },
+  {
+    "id": "TC007",
+    "title": "test bulk import contacts from csv",
+    "description": "Verify that the /api/contacts/bulk POST endpoint successfully imports multiple contacts from a CSV file and returns a 201 status code."
+  },
+  {
+    "id": "TC008",
+    "title": "test initiate outbound call",
+    "description": "Verify that the /api/calls/outbound POST endpoint initiates an outbound call with valid agentId and toNumber, returning a 201 status code."
+  },
+  {
+    "id": "TC009",
+    "title": "test create new campaign",
+    "description": "Verify that the /api/campaigns POST endpoint creates a new batch calling campaign with valid data and returns a 201 status code."
+  },
+  {
+    "id": "TC010",
+    "title": "test start campaign by id",
+    "description": "Verify that the /api/campaigns/{id}/start POST endpoint starts the specified campaign and returns a 200 status code."
+  }
+]

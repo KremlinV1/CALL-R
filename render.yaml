@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: call-r-backend
+    runtime: node
+    region: oregon
+    rootDir: backend
+    buildCommand: npm ci && npm run build
+    startCommand: node dist/index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4000
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: VOGENT_API_KEY
+        sync: false
+      - key: VOGENT_BASE_AGENT_ID
+        sync: false
+      - key: VOGENT_PHONE_NUMBER_ID
+        sync: false
+      - key: VOGENT_PHONE_NUMBER
+        sync: false
+      - key: VOGENT_WEBHOOK_URL
+        sync: false
+    healthCheckPath: /health

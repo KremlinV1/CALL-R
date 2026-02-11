@@ -1,0 +1,18 @@
+{
+  "status": "commited",
+  "type": "backend",
+  "scope": "codebase",
+  "localEndpoint": "http://localhost:4000/http://localhost:4000/api",
+  "backendAuthType": "Bearer token",
+  "backendCredential": "your-super-secret-jwt-key-change-in-production",
+  "executionArgs": {
+    "projectName": "pon-e-line-backend",
+    "projectPath": "/Users/kremlinv1/Downloads/agents-main/pon-e-line/backend",
+    "testIds": [],
+    "additionalInstruction": "Focus on testing the calls/outbound API endpoint and LiveKit SIP integration",
+    "envs": {
+      "API_KEY": "sk-user-dmDkeJSx_9g9EVsn3AqxCii-KL4_5OGjgW2ZQfjHSVUWmxSUSPGsqFOfQuOEpnrwTDwkztCIaENfWhoulp2TRybl7ziDw3YGatDf51gIWKY4I4f-3hMI6f_Tw5ZmQrVN5W8"
+    }
+  },
+  "proxy": "http://ad6a90dd-9aad-4491-b22f-98654b584040:8O5H9zgCDoSWunj7s3RbbHRpx9Lk6Ch2@tun.testsprite.com:8080"
+}
