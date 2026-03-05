@@ -348,7 +348,7 @@ async function updateAgentEnvFile(provider: Provider, apiKey: string): Promise<v
 // TELEPHONY PROVIDER ROUTES
 // ============================================
 
-const TELEPHONY_PROVIDERS = ['twilio', 'telnyx', 'vonage', 'signalwire', 'livekit_sip', 'vogent', 'dasha'] as const;
+const TELEPHONY_PROVIDERS = ['livekit_sip'] as const;
 type TelephonyProvider = typeof TELEPHONY_PROVIDERS[number];
 
 interface TelephonyConfigRequest {
@@ -358,12 +358,6 @@ interface TelephonyConfigRequest {
   apiKey?: string;
   sipUri?: string;
   spaceUrl?: string; // SignalWire space name (e.g., "myspace" for myspace.signalwire.com)
-  // Vogent specific
-  vogentBaseAgentId?: string;
-  vogentPhoneNumberId?: string;
-  vogentDefaultModelId?: string;
-  // Dasha specific
-  dashaAgentId?: string;
 }
 
 // GET /api/settings/telephony - Get telephony configuration
@@ -382,10 +376,6 @@ router.get('/telephony', async (req: Request, res: Response) => {
         authTokenPrefix: telephonyConfig.authTokenPrefix,
         livekitSipUri: telephonyConfig.livekitSipUri,
         signalwireSpaceUrl: telephonyConfig.signalwireSpaceUrl,
-        vogentBaseAgentId: telephonyConfig.vogentBaseAgentId,
-        vogentPhoneNumberId: telephonyConfig.vogentPhoneNumberId,
-        vogentDefaultModelId: telephonyConfig.vogentDefaultModelId,
-        dashaAgentId: telephonyConfig.dashaAgentId,
         isConfigured: telephonyConfig.isConfigured,
         lastVerifiedAt: telephonyConfig.lastVerifiedAt,
         updatedAt: telephonyConfig.updatedAt,
@@ -410,10 +400,6 @@ router.get('/telephony', async (req: Request, res: Response) => {
       authTokenPrefix: config[0].authTokenPrefix,
       livekitSipUri: config[0].livekitSipUri,
       signalwireSpaceUrl: config[0].signalwireSpaceUrl,
-      vogentBaseAgentId: config[0].vogentBaseAgentId,
-      vogentPhoneNumberId: config[0].vogentPhoneNumberId,
-      vogentDefaultModelId: config[0].vogentDefaultModelId,
-      dashaAgentId: config[0].dashaAgentId,
       lastVerifiedAt: config[0].lastVerifiedAt,
       updatedAt: config[0].updatedAt,
     });
@@ -427,7 +413,7 @@ router.get('/telephony', async (req: Request, res: Response) => {
 router.post('/telephony', async (req: Request, res: Response) => {
   try {
     const organizationId = (req as any).user?.organizationId;
-    const { provider, accountSid, authToken, apiKey, sipUri, spaceUrl, vogentBaseAgentId, vogentPhoneNumberId, vogentDefaultModelId, dashaAgentId } = req.body as TelephonyConfigRequest;
+    const { provider, accountSid, authToken, apiKey, sipUri, spaceUrl } = req.body as TelephonyConfigRequest;
 
     if (!organizationId) {
       return res.status(401).json({ error: 'Unauthorized' });
@@ -438,29 +424,9 @@ router.post('/telephony', async (req: Request, res: Response) => {
     }
 
     // Validate required fields based on provider
-    if (provider === 'twilio' || provider === 'vonage') {
-      if (!accountSid || !authToken) {
-        return res.status(400).json({ error: 'Account SID and Auth Token are required' });
-      }
-    } else if (provider === 'telnyx') {
-      if (!apiKey) {
-        return res.status(400).json({ error: 'API Key is required for Telnyx' });
-      }
-    } else if (provider === 'signalwire') {
-      if (!accountSid || !authToken || !spaceUrl) {
-        return res.status(400).json({ error: 'Project ID, API Token, and Space URL are required for SignalWire' });
-      }
-    } else if (provider === 'livekit_sip') {
+    if (provider === 'livekit_sip') {
       if (!sipUri) {
         return res.status(400).json({ error: 'SIP URI is required for LiveKit SIP' });
-      }
-    } else if (provider === 'vogent') {
-      if (!apiKey) {
-        return res.status(400).json({ error: 'API Key is required for Vogent' });
-      }
-    } else if (provider === 'dasha') {
-      if (!apiKey) {
-        return res.status(400).json({ error: 'API Key is required for Dasha' });
       }
     }
 
@@ -493,10 +459,6 @@ router.post('/telephony', async (req: Request, res: Response) => {
           authTokenPrefix,
           livekitSipUri: sipUri || null,
           signalwireSpaceUrl: spaceUrl || null,
-          vogentBaseAgentId: vogentBaseAgentId || null,
-          vogentPhoneNumberId: vogentPhoneNumberId || null,
-          vogentDefaultModelId: vogentDefaultModelId || null,
-          dashaAgentId: dashaAgentId || null,
           isConfigured: true,
           updatedAt: new Date(),
         })
@@ -513,10 +475,6 @@ router.post('/telephony', async (req: Request, res: Response) => {
         authTokenPrefix,
         livekitSipUri: sipUri || null,
         signalwireSpaceUrl: spaceUrl || null,
-        vogentBaseAgentId: vogentBaseAgentId || null,
-        vogentPhoneNumberId: vogentPhoneNumberId || null,
-        vogentDefaultModelId: vogentDefaultModelId || null,
-        dashaAgentId: dashaAgentId || null,
         isConfigured: true,
       });
     }
@@ -586,56 +544,9 @@ async function verifyTelephonyCredentials(
 ): Promise<boolean> {
   try {
     switch (provider) {
-      case 'twilio':
-        // Verify Twilio credentials
-        const twilioAuth = Buffer.from(`${credentials.accountSid}:${credentials.authToken}`).toString('base64');
-        const twilioRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${credentials.accountSid}.json`, {
-          headers: { 'Authorization': `Basic ${twilioAuth}` }
-        });
-        return twilioRes.ok;
-
-      case 'vonage':
-        // Verify Vonage credentials (uses API key + secret)
-        const vonageRes = await fetch('https://api.nexmo.com/account/get-balance', {
-          headers: {
-            'Authorization': `Basic ${Buffer.from(`${credentials.accountSid}:${credentials.authToken}`).toString('base64')}`
-          }
-        });
-        return vonageRes.ok || vonageRes.status === 401; // Some endpoints return 401 but confirm auth works
-
-      case 'telnyx':
-        // Verify Telnyx API key
-        const telnyxRes = await fetch('https://api.telnyx.com/v2/balance', {
-          headers: { 'Authorization': `Bearer ${credentials.apiKey}` }
-        });
-        return telnyxRes.ok;
-
-      case 'signalwire':
-        // Verify SignalWire credentials using Project ID + API Token with Basic Auth
-        // API endpoint: https://{space_url}.signalwire.com/api/relay/rest/phone_numbers
-        const signalwireAuth = Buffer.from(`${credentials.accountSid}:${credentials.authToken}`).toString('base64');
-        const signalwireRes = await fetch(`https://${credentials.spaceUrl}.signalwire.com/api/relay/rest/phone_numbers`, {
-          headers: { 'Authorization': `Basic ${signalwireAuth}` }
-        });
-        return signalwireRes.ok;
-
       case 'livekit_sip':
         // LiveKit SIP doesn't have a simple verify endpoint
         return true;
-
-      case 'vogent':
-        // Verify Vogent API key by listing agents
-        const vogentRes = await fetch('https://api.vogent.ai/api/agents', {
-          headers: { 'Authorization': `Bearer ${credentials.apiKey}` }
-        });
-        return vogentRes.ok;
-
-      case 'dasha':
-        // Verify Dasha API key by listing agents
-        const dashaRes = await fetch('https://blackbox.dasha.ai/api/v1/agents?skip=0&take=1', {
-          headers: { 'Authorization': `Bearer ${credentials.apiKey}` }
-        });
-        return dashaRes.ok;
 
       default:
         return false;
@@ -668,27 +579,8 @@ async function updateTelephonyEnvFile(
     const updates: Record<string, string | undefined> = {};
     
     switch (provider) {
-      case 'twilio':
-        updates['TWILIO_ACCOUNT_SID'] = credentials.accountSid;
-        updates['TWILIO_AUTH_TOKEN'] = credentials.authToken;
-        break;
-      case 'vonage':
-        updates['VONAGE_API_KEY'] = credentials.accountSid;
-        updates['VONAGE_API_SECRET'] = credentials.authToken;
-        break;
-      case 'telnyx':
-        updates['TELNYX_API_KEY'] = credentials.apiKey;
-        break;
-      case 'signalwire':
-        updates['SIGNALWIRE_PROJECT_ID'] = credentials.accountSid;
-        updates['SIGNALWIRE_API_TOKEN'] = credentials.authToken;
-        updates['SIGNALWIRE_SPACE_URL'] = credentials.spaceUrl;
-        break;
-      case 'vogent':
-        updates['VOGENT_API_KEY'] = credentials.apiKey;
-        break;
-      case 'dasha':
-        updates['DASHA_API_KEY'] = credentials.apiKey;
+      case 'livekit_sip':
+        // LiveKit SIP credentials are set via LIVEKIT_* env vars; no additional updates needed here
         break;
     }
 

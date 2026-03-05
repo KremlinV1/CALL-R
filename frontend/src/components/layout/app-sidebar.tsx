@@ -39,6 +39,7 @@ import {
   CreditCard,
   HelpCircle,
   RefreshCw,
+  Menu,
 } from "lucide-react"
 import { useAuthStore } from "@/stores/auth-store"
 import { toast } from "sonner"
@@ -48,6 +49,7 @@ const navSections = [
     label: "BUILD",
     items: [
       { title: "Agents", href: "/agents", icon: Bot },
+      { title: "IVR Menus", href: "/ivr", icon: Menu },
     ],
   },
   {

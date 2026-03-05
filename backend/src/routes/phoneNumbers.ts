@@ -12,24 +12,9 @@ const VONAGE_API_KEY_ENV = process.env.VONAGE_API_KEY;
 const VONAGE_API_SECRET_ENV = process.env.VONAGE_API_SECRET;
 
 // Helper: get Vonage credentials from DB or env vars
-async function getVonageCreds(organizationId: string) {
-  const config = await db
-    .select({
-      provider: telephonyConfig.provider,
-      encryptedAccountSid: telephonyConfig.encryptedAccountSid,
-      encryptedAuthToken: telephonyConfig.encryptedAuthToken,
-    })
-    .from(telephonyConfig)
-    .where(eq(telephonyConfig.organizationId, organizationId))
-    .limit(1);
-
-  if (config.length > 0 && config[0].provider === 'vonage' && config[0].encryptedAccountSid && config[0].encryptedAuthToken) {
-    return {
-      apiKey: decryptApiKey(config[0].encryptedAccountSid),
-      apiSecret: decryptApiKey(config[0].encryptedAuthToken),
-    };
-  }
-
+// Vonage credentials helper (legacy; LiveKit-only now, but kept for env fallback)
+async function getVonageCreds(_organizationId: string) {
+  // LiveKit-only: return env fallback for any legacy Vonage usage
   return {
     apiKey: VONAGE_API_KEY_ENV || '',
     apiSecret: VONAGE_API_SECRET_ENV || '',

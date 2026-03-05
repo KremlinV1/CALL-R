@@ -1,13 +1,11 @@
 import { Router, Response } from 'express';
 import { AuthRequest } from '../middleware/auth.js';
 import { db } from '../db/index.js';
-import { calls, agents, contacts, phoneNumbers, campaigns, campaignContacts, telephonyConfig } from '../db/schema.js';
+import { calls, agents, contacts, phoneNumbers, campaigns, campaignContacts } from '../db/schema.js';
 import { eq, and, desc, gte, lte, sql, or, ilike } from 'drizzle-orm';
 import crypto from 'crypto';
 import { OutcomeDecisionEngine } from '../services/outcomeDecisionEngine.js';
-import { vogentService } from '../services/vogent.js';
-import { dashaService } from '../services/dasha.js';
-import { decryptApiKey } from '../utils/crypto.js';
+// LiveKit-only outbound provider (DIDWW trunk via LiveKit SIP)
 
 const router = Router();
 
@@ -18,153 +16,9 @@ const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET;
 const LIVEKIT_SIP_TRUNK_OUTBOUND = process.env.LIVEKIT_SIP_TRUNK_OUTBOUND;
 const LIVEKIT_SIP_TRUNK_INBOUND = process.env.LIVEKIT_SIP_TRUNK_INBOUND;
 
-// Phone numbers
+// Phone numbers (legacy)
 const VONAGE_PHONE_NUMBER = process.env.VONAGE_PHONE_NUMBER || '';
 const LIVEKIT_PHONE_NUMBER = process.env.LIVEKIT_PHONE_NUMBER || '';
-
-// Vogent env-var fallbacks (used when no DB config exists)
-const VOGENT_API_KEY_ENV = process.env.VOGENT_API_KEY;
-const VOGENT_BASE_AGENT_ID_ENV = process.env.VOGENT_BASE_AGENT_ID;
-const VOGENT_PHONE_NUMBER_ID_ENV = process.env.VOGENT_PHONE_NUMBER_ID;
-const VOGENT_PHONE_NUMBER_ENV = process.env.VOGENT_PHONE_NUMBER || '';
-const VOGENT_DEFAULT_MODEL_ID_ENV = process.env.VOGENT_DEFAULT_MODEL_ID || '';
-
-// Cache for auto-fetched Vogent model ID
-let cachedVogentModelId: string | null = null;
-
-// Load Vogent credentials from DB (per-org), falling back to env vars
-async function getVogentConfig(organizationId: string) {
-  const config = await db
-    .select({
-      encryptedApiKey: telephonyConfig.encryptedApiKey,
-      vogentBaseAgentId: telephonyConfig.vogentBaseAgentId,
-      vogentPhoneNumberId: telephonyConfig.vogentPhoneNumberId,
-      vogentDefaultModelId: telephonyConfig.vogentDefaultModelId,
-      provider: telephonyConfig.provider,
-    })
-    .from(telephonyConfig)
-    .where(eq(telephonyConfig.organizationId, organizationId))
-    .limit(1);
-
-  let result;
-  if (config.length > 0 && config[0].provider === 'vogent' && config[0].encryptedApiKey) {
-    const apiKey = decryptApiKey(config[0].encryptedApiKey);
-    result = {
-      apiKey,
-      baseAgentId: config[0].vogentBaseAgentId || VOGENT_BASE_AGENT_ID_ENV || '',
-      phoneNumberId: config[0].vogentPhoneNumberId || VOGENT_PHONE_NUMBER_ID_ENV || '',
-      defaultModelId: config[0].vogentDefaultModelId || VOGENT_DEFAULT_MODEL_ID_ENV || '',
-    };
-  } else {
-    // Fallback to env vars
-    result = {
-      apiKey: VOGENT_API_KEY_ENV || '',
-      baseAgentId: VOGENT_BASE_AGENT_ID_ENV || '',
-      phoneNumberId: VOGENT_PHONE_NUMBER_ID_ENV || '',
-      defaultModelId: VOGENT_DEFAULT_MODEL_ID_ENV || '',
-    };
-  }
-
-  // Auto-fetch model ID from Vogent API if not configured
-  if (!result.defaultModelId && result.apiKey) {
-    if (cachedVogentModelId) {
-      result.defaultModelId = cachedVogentModelId;
-    } else {
-      try {
-        vogentService.configure(result.apiKey);
-        const models = await vogentService.listModels();
-        const modelList = models.data || [];
-        if (modelList.length > 0) {
-          cachedVogentModelId = modelList[0].id;
-          result.defaultModelId = cachedVogentModelId;
-          console.log(`🤖 Auto-fetched Vogent model ID: ${cachedVogentModelId} (${modelList[0].name})`);
-        } else {
-          console.warn('⚠️ No Vogent models found — prompt overrides may not work');
-        }
-      } catch (e: any) {
-        console.error('⚠️ Failed to auto-fetch Vogent model ID:', e.message);
-      }
-    }
-  }
-
-  return result;
-}
-
-// Dasha env-var fallbacks
-const DASHA_API_KEY_ENV = process.env.DASHA_API_KEY || '';
-const DASHA_AGENT_ID_ENV = process.env.DASHA_AGENT_ID || '';
-
-// Cache for auto-created Dasha agent ID
-let cachedDashaAgentId: string | null = null;
-
-// Load Dasha credentials from DB (per-org), falling back to env vars
-async function getDashaConfig(organizationId: string) {
-  const config = await db
-    .select({
-      encryptedApiKey: telephonyConfig.encryptedApiKey,
-      dashaAgentId: telephonyConfig.dashaAgentId,
-      provider: telephonyConfig.provider,
-    })
-    .from(telephonyConfig)
-    .where(eq(telephonyConfig.organizationId, organizationId))
-    .limit(1);
-
-  if (config.length > 0 && config[0].provider === 'dasha' && config[0].encryptedApiKey) {
-    const apiKey = decryptApiKey(config[0].encryptedApiKey);
-    return {
-      apiKey,
-      dashaAgentId: config[0].dashaAgentId || DASHA_AGENT_ID_ENV || '',
-    };
-  }
-
-  // Fallback to env vars
-  return {
-    apiKey: DASHA_API_KEY_ENV,
-    dashaAgentId: DASHA_AGENT_ID_ENV,
-  };
-}
-
-// Ensure a Dasha agent exists for the given local agent — creates one if needed
-async function ensureDashaAgent(
-  localAgent: any,
-  dashaCfg: { apiKey: string; dashaAgentId: string },
-  organizationId: string
-): Promise<string> {
-  // If we already have a Dasha agent ID, verify it exists
-  if (dashaCfg.dashaAgentId) {
-    try {
-      await dashaService.getAgent(dashaCfg.dashaAgentId);
-      return dashaCfg.dashaAgentId;
-    } catch {
-      console.log('⚠️ Stored Dasha agent ID invalid, will create new one');
-    }
-  }
-
-  if (cachedDashaAgentId) {
-    return cachedDashaAgentId;
-  }
-
-  // Create a new Dasha agent from the local agent config
-  const webhookBaseUrl = process.env.API_URL || `http://localhost:${process.env.PORT || 4000}`;
-  const agentConfig = dashaService.buildDashaAgentConfig(localAgent, webhookBaseUrl);
-
-  console.log('🤖 Creating Dasha agent:', agentConfig.name);
-  const dashaAgent = await dashaService.createAgent(agentConfig);
-  console.log('✅ Dasha agent created:', dashaAgent.agentId);
-
-  cachedDashaAgentId = dashaAgent.agentId;
-
-  // Store the Dasha agent ID in the DB for future use
-  try {
-    await db.update(telephonyConfig)
-      .set({ dashaAgentId: dashaAgent.agentId })
-      .where(eq(telephonyConfig.organizationId, organizationId));
-  } catch (e: any) {
-    console.log('⚠️ Could not persist Dasha agent ID to DB:', e.message);
-  }
-
-  return dashaAgent.agentId;
-}
 
 // Helper to create LiveKit API client
 async function getLiveKitApi() {
@@ -396,9 +250,7 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
   }
 });
 
-// Proxy recording audio from Vogent (requires API auth)
-// Supports ?token= query param since <audio> elements can't send Authorization headers
-// Forwards Range headers for browser audio seeking support
+// Proxy recording audio (LiveKit recordings are stored directly; no auth proxy needed)
 router.get('/:id/recording', async (req: AuthRequest, res: Response) => {
   try {
     const organizationId = req.user?.organizationId;
@@ -415,48 +267,10 @@ router.get('/:id/recording', async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ error: 'No recording found' });
     }
 
-    // Get Vogent API key for this org
-    const vogentCfg = await getVogentConfig(organizationId);
-    if (!vogentCfg.apiKey) {
-      return res.status(500).json({ error: 'Vogent not configured' });
-    }
-
-    // Build upstream headers — forward Range for seeking support
-    const upstreamHeaders: Record<string, string> = {
-      'Authorization': `Bearer ${vogentCfg.apiKey}`,
-    };
-    if (req.headers.range) {
-      upstreamHeaders['Range'] = req.headers.range;
-    }
-
-    // Fetch the recording from Vogent with auth and stream to client
-    const { default: axios } = await import('axios');
-    const audioResponse = await axios.get(call.recordingUrl, {
-      headers: upstreamHeaders,
-      responseType: 'stream',
-      // Don't reject 206 Partial Content
-      validateStatus: (s: number) => s >= 200 && s < 300,
-    });
-
-    // Forward status (200 or 206)
-    res.status(audioResponse.status);
-    res.set({
-      'Content-Type': audioResponse.headers['content-type'] || 'audio/mpeg',
-      'Accept-Ranges': 'bytes',
-      'Cache-Control': 'private, max-age=3600',
-      // Override helmet's same-origin policy so <audio> elements can load cross-origin
-      'Cross-Origin-Resource-Policy': 'cross-origin',
-    });
-    if (audioResponse.headers['content-length']) {
-      res.set('Content-Length', audioResponse.headers['content-length']);
-    }
-    if (audioResponse.headers['content-range']) {
-      res.set('Content-Range', audioResponse.headers['content-range']);
-    }
-
-    audioResponse.data.pipe(res);
+    // Redirect to recording URL (LiveKit stores recordings in S3/GCS with signed URLs)
+    res.redirect(call.recordingUrl);
   } catch (error: any) {
-    console.error('Error proxying recording:', error?.response?.status, error.message);
+    console.error('Error fetching recording:', error.message);
     if (!res.headersSent) {
       res.status(500).json({ error: 'Failed to fetch recording' });
     }
@@ -490,29 +304,15 @@ router.post('/outbound', async (req: AuthRequest, res: Response) => {
     
     const agent = agentResult[0];
     
-    // Determine which provider to use — check Dasha first, then Vogent, then LiveKit
-    let callProvider = requestedProvider || '';
-    if (!callProvider) {
-      const dashaCfg = await getDashaConfig(organizationId);
-      if (dashaCfg.apiKey) {
-        callProvider = 'dasha';
-      } else {
-        const vogentCfg = await getVogentConfig(organizationId);
-        if (vogentCfg.apiKey && vogentCfg.baseAgentId) {
-          callProvider = 'vogent';
-        } else if (LIVEKIT_URL && LIVEKIT_API_KEY) {
-          callProvider = 'livekit';
-        } else {
-          return res.status(400).json({ error: 'No telephony provider configured. Go to Settings > Telephony to set up Dasha, Vogent, or LiveKit.' });
-        }
-      }
+    // LiveKit-only
+    const callProvider = 'livekit';
+    if (!(LIVEKIT_URL && LIVEKIT_API_KEY && LIVEKIT_SIP_TRUNK_OUTBOUND)) {
+      return res.status(400).json({ error: 'LiveKit SIP trunk not configured. Set LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_SIP_TRUNK_OUTBOUND.' });
     }
     
-    // Get from number
+    // Get from number (optional; LiveKit trunk CLI typically configured server-side)
     let fromNumber = '';
-    if (callProvider === 'vogent') {
-      fromNumber = VOGENT_PHONE_NUMBER_ENV || '';
-    } else if (fromNumberId) {
+    if (fromNumberId) {
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(fromNumberId);
       const numberResult = await db
         .select()
@@ -521,15 +321,6 @@ router.post('/outbound', async (req: AuthRequest, res: Response) => {
           isUuid ? eq(phoneNumbers.id, fromNumberId) : eq(phoneNumbers.providerSid, fromNumberId),
           eq(phoneNumbers.organizationId, organizationId)
         ))
-        .limit(1);
-      if (numberResult.length > 0) {
-        fromNumber = numberResult[0].number;
-      }
-    } else {
-      const numberResult = await db
-        .select()
-        .from(phoneNumbers)
-        .where(and(eq(phoneNumbers.organizationId, organizationId), eq(phoneNumbers.status, 'active')))
         .limit(1);
       if (numberResult.length > 0) {
         fromNumber = numberResult[0].number;
@@ -558,247 +349,57 @@ router.post('/outbound', async (req: AuthRequest, res: Response) => {
       },
     }).returning();
 
-    // ── Dasha provider ───────────────────────────────────
-    if (callProvider === 'dasha') {
-      try {
-        const dashaCfg = await getDashaConfig(organizationId);
-        if (!dashaCfg.apiKey) {
-          throw new Error('Dasha not configured — missing API key. Go to Settings > Telephony.');
+    // ── LiveKit provider (only) ─────────────────────────
+    try {
+      console.log('🔧 LiveKit config:', {
+        hasApiKey: !!LIVEKIT_API_KEY,
+        hasApiSecret: !!LIVEKIT_API_SECRET,
+        trunkId: LIVEKIT_SIP_TRUNK_OUTBOUND,
+        url: LIVEKIT_URL,
+      });
+      
+      const { roomService, sipClient } = await getLiveKitApi();
+      
+      console.log('📞 Creating room:', roomName);
+      await roomService.createRoom({
+        name: roomName,
+        metadata: JSON.stringify({
+          callId: newCall.id,
+          agentId,
+          direction: 'outbound',
+        }),
+      });
+      console.log('✅ Room created');
+      
+      await db.update(calls)
+        .set({ status: 'ringing', startedAt: new Date() })
+        .where(eq(calls.id, newCall.id));
+      
+      console.log('📞 Creating SIP participant:', {
+        trunkId: LIVEKIT_SIP_TRUNK_OUTBOUND,
+        toNumber: formattedToNumber,
+        roomName,
+      });
+      
+      const sipResult = await sipClient.createSipParticipant(
+        LIVEKIT_SIP_TRUNK_OUTBOUND!,
+        formattedToNumber,
+        roomName,
+        {
+          participantIdentity: formattedToNumber,
+          participantName: 'Customer',
         }
-
-        dashaService.configure(dashaCfg.apiKey);
-        console.log('📞 Dasha: Scheduling call to', formattedToNumber);
-
-        // Ensure a Dasha agent exists (creates one if needed)
-        const dashaAgentId = await ensureDashaAgent(agent, dashaCfg, organizationId);
-
-        // Build per-call additionalData for variable interpolation
-        const additionalData: Record<string, string> = {};
-        if (contactId) {
-          const contactResult = await db.select().from(contacts).where(eq(contacts.id, contactId)).limit(1);
-          if (contactResult.length > 0) {
-            const c = contactResult[0];
-            additionalData.first_name = c.firstName || '';
-            additionalData.last_name = c.lastName || '';
-            additionalData.company_name = c.company || '';
-            additionalData.company = c.company || '';
-            additionalData.phone = c.phone || '';
-            additionalData.email = c.email || '';
-          }
-        }
-
-        // Also store our internal IDs for webhook correlation
-        additionalData._callId = newCall.id;
-        additionalData._campaignId = (req.body.campaignId || '') as string;
-        additionalData._contactId = (contactId || '') as string;
-
-        // Schedule the call on Dasha
-        const dashaCall = await dashaService.scheduleCall(
-          dashaAgentId,
-          formattedToNumber,
-          5, // default priority
-          additionalData
-        );
-
-        console.log('✅ Dasha call scheduled:', dashaCall.callId, 'status:', dashaCall.status);
-
-        // Store the Dasha call ID on the call record
-        await db.update(calls)
-          .set({
-            externalId: dashaCall.callId,
-            status: 'ringing',
-            startedAt: new Date(),
-            metadata: {
-              ...(newCall.metadata as object),
-              dashaCallId: dashaCall.callId,
-              dashaAgentId,
-              campaignId: req.body.campaignId || null,
-              contactId: contactId || null,
-            },
-          })
-          .where(eq(calls.id, newCall.id));
-      } catch (dashaError: any) {
-        console.error('❌ Dasha error:', dashaError?.response?.data || dashaError.message);
-        await db.update(calls)
-          .set({
-            status: 'failed',
-            metadata: {
-              ...(newCall.metadata as object),
-              error: String(dashaError?.response?.data?.message || dashaError.message),
-            },
-          })
-          .where(eq(calls.id, newCall.id));
-      }
-    }
-    // ── Vogent provider ──────────────────────────────────
-    else if (callProvider === 'vogent') {
-      try {
-        // Load credentials from DB (per-org) with env var fallback
-        const vogentCfg = await getVogentConfig(organizationId);
-        if (!vogentCfg.apiKey || !vogentCfg.baseAgentId || !vogentCfg.phoneNumberId) {
-          throw new Error('Vogent not fully configured — missing API key, agent ID, or phone number ID. Go to Settings > Telephony.');
-        }
-
-        // Configure the service with the org's API key
-        vogentService.configure(vogentCfg.apiKey);
-
-        console.log('📞 Vogent: Initiating dial to', formattedToNumber);
-
-        // Fetch contact data for template variable resolution (if contactId provided)
-        let contactData: Record<string, string> | undefined;
-        if (contactId) {
-          const contactResult = await db.select().from(contacts).where(eq(contacts.id, contactId)).limit(1);
-          if (contactResult.length > 0) {
-            const c = contactResult[0];
-            contactData = {
-              first_name: c.firstName || '',
-              last_name: c.lastName || '',
-              company_name: c.company || '',
-              company: c.company || '',
-              phone: c.phone || '',
-              email: c.email || '',
-            };
-          }
-        }
-
-        // Set up transfer function on Vogent if agent has transfer enabled
-        const transferDests = (agent.transferDestinations as Array<{ name: string; phoneNumber: string; description?: string }>) || [];
-        const hasTransfer = agent.transferEnabled && transferDests.length > 0 && transferDests.some(d => d.phoneNumber);
-
-        if (hasTransfer) {
-          try {
-            const transferFuncId = await vogentService.ensureTransferFunction(transferDests);
-            // Link the transfer function to the Vogent base agent
-            await vogentService.updateAgent(vogentCfg.baseAgentId, {
-              linkedFunctionDefinitionIds: [transferFuncId],
-            });
-            console.log('📞 Transfer function linked:', transferFuncId);
-          } catch (transferErr: any) {
-            console.error('⚠️ Failed to set up transfer function:', transferErr?.response?.data || transferErr.message);
-            // Continue without transfer — not a fatal error
-          }
-        } else {
-          // No transfer destinations — clear any linked functions
-          try {
-            await vogentService.updateAgent(vogentCfg.baseAgentId, {
-              linkedFunctionDefinitionIds: [],
-            });
-          } catch (e) {
-            // Ignore cleanup errors
-          }
-        }
-
-        // Build per-call agent overrides (prompt + model from our agent, voice from Vogent)
-        const agentOverrides = vogentService.buildAgentOverrides({
-          name: agent.name,
-          systemPrompt: agent.systemPrompt,
-          voiceId: agent.voiceId,
-          voiceSettings: agent.voiceSettings,
-          llmModel: agent.llmModel,
-          llmSettings: agent.llmSettings,
-          voicemailEnabled: agent.voicemailEnabled ?? false,
-          voicemailMessage: agent.voicemailMessage,
-          actions: agent.actions,
-          transferEnabled: agent.transferEnabled ?? false,
-          transferDestinations: transferDests,
-        }, vogentCfg.defaultModelId, contactData);
-
-        console.log('🔧 Vogent agentOverrides:', JSON.stringify({
-          openingLine: agentOverrides?.openingLine,
-          defaultVoiceId: agentOverrides?.defaultVoiceId,
-          language: agentOverrides?.language,
-          hasTransfer,
-        }));
-
-        const webhookUrl = process.env.VOGENT_WEBHOOK_URL; // Optional: set if publicly reachable
-
-        const dialResult = await vogentService.createDial({
-          callAgentId: vogentCfg.baseAgentId,
-          toNumber: formattedToNumber,
-          fromNumberId: vogentCfg.phoneNumberId,
-          webhookUrl,
-          agentOverrides,
-        });
-
-        console.log('✅ Vogent dial created:', dialResult);
-
-        // Store the Vogent dial ID on the call record
-        await db.update(calls)
-          .set({
-            externalId: dialResult.dialId,
-            status: 'ringing',
-            startedAt: new Date(),
-            metadata: {
-              ...(newCall.metadata as object),
-              vogentDialId: dialResult.dialId,
-              vogentSessionId: dialResult.sessionId,
-            },
-          })
-          .where(eq(calls.id, newCall.id));
-      } catch (vogentError: any) {
-        console.error('❌ Vogent error:', vogentError?.response?.data || vogentError.message);
-        await db.update(calls)
-          .set({ status: 'failed', metadata: { ...(newCall.metadata as object), error: String(vogentError?.response?.data?.message || vogentError.message) } })
-          .where(eq(calls.id, newCall.id));
-      }
-    }
-    // ── LiveKit provider (legacy) ─────────────────────────
-    else {
-      try {
-        console.log('🔧 LiveKit config:', {
-          hasApiKey: !!LIVEKIT_API_KEY,
-          hasApiSecret: !!LIVEKIT_API_SECRET,
-          trunkId: LIVEKIT_SIP_TRUNK_OUTBOUND,
-          url: LIVEKIT_URL,
-        });
-        
-        if (LIVEKIT_API_KEY && LIVEKIT_API_SECRET && LIVEKIT_SIP_TRUNK_OUTBOUND) {
-          const { roomService, sipClient } = await getLiveKitApi();
-          
-          console.log('📞 Creating room:', roomName);
-          await roomService.createRoom({
-            name: roomName,
-            metadata: JSON.stringify({
-              callId: newCall.id,
-              agentId,
-              direction: 'outbound',
-            }),
-          });
-          console.log('✅ Room created');
-          
-          await db.update(calls)
-            .set({ status: 'ringing', startedAt: new Date() })
-            .where(eq(calls.id, newCall.id));
-          
-          console.log('📞 Creating SIP participant:', {
-            trunkId: LIVEKIT_SIP_TRUNK_OUTBOUND,
-            toNumber: formattedToNumber,
-            roomName,
-          });
-          
-          const sipResult = await sipClient.createSipParticipant(
-            LIVEKIT_SIP_TRUNK_OUTBOUND!,
-            formattedToNumber,
-            roomName,
-            {
-              participantIdentity: formattedToNumber,
-              participantName: 'Customer',
-            }
-          );
-          console.log('✅ SIP participant created:', sipResult);
-          
-          await db.update(calls)
-            .set({ status: 'in_progress', answeredAt: new Date() })
-            .where(eq(calls.id, newCall.id));
-        } else {
-          console.log('⚠️ LiveKit not configured - missing credentials');
-        }
-      } catch (livekitError) {
-        console.error('❌ LiveKit error:', livekitError);
-        await db.update(calls)
-          .set({ status: 'failed', metadata: { ...(newCall.metadata as object), error: String(livekitError) } })
-          .where(eq(calls.id, newCall.id));
-      }
+      );
+      console.log('✅ SIP participant created:', sipResult);
+      
+      await db.update(calls)
+        .set({ status: 'in_progress', answeredAt: new Date() })
+        .where(eq(calls.id, newCall.id));
+    } catch (livekitError) {
+      console.error('❌ LiveKit error:', livekitError);
+      await db.update(calls)
+        .set({ status: 'failed', metadata: { ...(newCall.metadata as object), error: String(livekitError) } })
+        .where(eq(calls.id, newCall.id));
     }
     
     // Emit socket event
@@ -859,17 +460,11 @@ router.post('/:id/end', async (req: AuthRequest, res: Response) => {
     
     // End the call on the external provider
     try {
-      if (call.provider === 'vogent' && call.externalId) {
-        // Hang up via Vogent
-        await vogentService.hangupDial(call.externalId);
-        console.log('📞 Vogent dial hung up:', call.externalId);
-      } else {
-        // End the LiveKit room if exists
-        const metadata = call.metadata as { roomName?: string } | null;
-        if (LIVEKIT_API_KEY && LIVEKIT_API_SECRET && metadata?.roomName) {
-          const { roomService } = await getLiveKitApi();
-          await roomService.deleteRoom(metadata.roomName);
-        }
+      // End the LiveKit room if exists
+      const metadata = call.metadata as { roomName?: string } | null;
+      if (LIVEKIT_API_KEY && LIVEKIT_API_SECRET && metadata?.roomName) {
+        const { roomService } = await getLiveKitApi();
+        await roomService.deleteRoom(metadata.roomName);
       }
     } catch (providerError) {
       console.error('Error ending call on provider:', providerError);

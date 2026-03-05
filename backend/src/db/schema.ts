@@ -277,7 +277,7 @@ export const aiProviderKeys = pgTable('ai_provider_keys', {
 });
 
 // Telephony Provider Configuration
-export const telephonyProviderEnum = pgEnum('telephony_provider', ['twilio', 'telnyx', 'vonage', 'signalwire', 'livekit_sip', 'vogent', 'dasha']);
+export const telephonyProviderEnum = pgEnum('telephony_provider', ['livekit_sip']);
 
 export const telephonyConfig = pgTable('telephony_config', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -296,16 +296,8 @@ export const telephonyConfig = pgTable('telephony_config', {
   // LiveKit SIP specific
   livekitSipUri: varchar('livekit_sip_uri', { length: 255 }),
   
-  // SignalWire specific - Space URL (e.g., "myspace" for myspace.signalwire.com)
+  // SignalWire specific - Space URL (e.g., "myspace" for myspace.signalwire.com) (legacy/ununsed in LiveKit-only)
   signalwireSpaceUrl: varchar('signalwire_space_url', { length: 255 }),
-  
-  // Vogent specific
-  vogentBaseAgentId: varchar('vogent_base_agent_id', { length: 255 }),
-  vogentPhoneNumberId: varchar('vogent_phone_number_id', { length: 255 }),
-  vogentDefaultModelId: varchar('vogent_default_model_id', { length: 255 }),
-  
-  // Dasha BlackBox specific
-  dashaAgentId: varchar('dasha_agent_id', { length: 255 }),
   
   isConfigured: boolean('is_configured').default(false),
   lastVerifiedAt: timestamp('last_verified_at'),
@@ -354,4 +346,87 @@ export const poolPhoneNumbers = pgTable('pool_phone_numbers', {
   
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// IVR Action Types
+export const ivrActionTypeEnum = pgEnum('ivr_action_type', [
+  'play_message',      // Play audio/TTS message
+  'transfer',          // Transfer to phone number or agent
+  'voicemail',         // Send to voicemail
+  'submenu',           // Go to another IVR menu
+  'hangup',            // End the call
+  'repeat',            // Repeat current menu
+  'agent',             // Connect to AI agent
+]);
+
+// IVR Menus
+export const ivrMenus = pgTable('ivr_menus', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id).notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+  description: text('description'),
+  isActive: boolean('is_active').default(true),
+  isDefault: boolean('is_default').default(false), // Default menu for inbound calls
+  
+  // Greeting settings
+  greetingType: varchar('greeting_type', { length: 20 }).default('tts'), // 'tts' or 'audio'
+  greetingText: text('greeting_text'), // TTS text
+  greetingAudioUrl: varchar('greeting_audio_url', { length: 500 }), // Pre-recorded audio URL
+  
+  // Voice settings for TTS
+  voiceProvider: varchar('voice_provider', { length: 50 }).default('cartesia'),
+  voiceId: varchar('voice_id', { length: 255 }),
+  
+  // Timeout settings
+  inputTimeoutSeconds: integer('input_timeout_seconds').default(5),
+  maxRetries: integer('max_retries').default(3),
+  invalidInputMessage: text('invalid_input_message').default('Sorry, I didn\'t understand that. Please try again.'),
+  timeoutMessage: text('timeout_message').default('I didn\'t receive any input. Goodbye.'),
+  
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// IVR Menu Options (DTMF key mappings)
+export const ivrMenuOptions = pgTable('ivr_menu_options', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  menuId: uuid('menu_id').references(() => ivrMenus.id, { onDelete: 'cascade' }).notNull(),
+  
+  // DTMF key (0-9, *, #)
+  dtmfKey: varchar('dtmf_key', { length: 2 }).notNull(),
+  label: varchar('label', { length: 255 }).notNull(), // Display label (e.g., "Sales")
+  
+  // Action configuration
+  actionType: ivrActionTypeEnum('action_type').notNull(),
+  
+  // Action-specific data (stored as JSON for flexibility)
+  // For transfer: { phoneNumber: string } or { agentId: string }
+  // For submenu: { menuId: string }
+  // For play_message: { message: string, tts: boolean }
+  // For agent: { agentId: string }
+  actionData: jsonb('action_data').default({}),
+  
+  // Optional announcement before action
+  announcementText: text('announcement_text'),
+  
+  sortOrder: integer('sort_order').default(0),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// IVR Call Logs (track IVR interactions)
+export const ivrCallLogs = pgTable('ivr_call_logs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id).notNull(),
+  callId: uuid('call_id').references(() => calls.id),
+  menuId: uuid('menu_id').references(() => ivrMenus.id),
+  
+  callerNumber: varchar('caller_number', { length: 20 }),
+  dtmfInputs: jsonb('dtmf_inputs').default([]), // Array of { key, timestamp, menuId }
+  finalAction: ivrActionTypeEnum('final_action'),
+  finalActionData: jsonb('final_action_data').default({}),
+  
+  durationSeconds: integer('duration_seconds'),
+  completedAt: timestamp('completed_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
 });

@@ -34,10 +34,8 @@ import contactListsRoutes from './routes/contactLists.js';
 import phoneNumbersRoutes from './routes/phoneNumbers.js';
 import livekitRoutes from './routes/livekit.js';
 import voiceRoutes from './routes/voice.js';
-import vogentRoutes from './routes/vogent.js';
-import dashaWebhookRoutes from './routes/webhooks/dasha.js';
+import ivrRoutes from './routes/ivr.js';
 import { campaignExecutor } from './services/campaignExecutor.js';
-import { vogentDialPoller } from './services/vogentDialPoller.js';
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler.js';
@@ -82,8 +80,6 @@ app.get('/health', (req, res) => {
 
 // Public routes
 app.use('/api/auth', authLimiter, authRoutes);
-app.use('/api/vogent', vogentRoutes); // Webhook endpoint is public; other routes check auth internally
-app.use('/api/webhooks/dasha', dashaWebhookRoutes); // Dasha webhook endpoint is public
 
 // Protected routes
 app.use('/api/agents', authMiddleware, agentsRoutes);
@@ -97,6 +93,7 @@ app.use('/api/contact-lists', authMiddleware, contactListsRoutes);
 app.use('/api/phone-numbers', authMiddleware, phoneNumbersRoutes);
 app.use('/api/livekit', authMiddleware, livekitRoutes);
 app.use('/api/voice', authMiddleware, voiceRoutes);
+app.use('/api/ivr', authMiddleware, ivrRoutes);
 
 // Socket.IO connection handling
 io.on('connection', async (socket) => {
@@ -156,16 +153,12 @@ httpServer.listen(PORT, () => {
   
   // Start campaign executor service
   campaignExecutor.start();
-
-  // Start Vogent dial status poller
-  vogentDialPoller.start(io);
 });
 
 // Graceful shutdown
 function shutdown(signal: string) {
   console.log(`${signal} received, shutting down gracefully...`);
   campaignExecutor.stop();
-  vogentDialPoller.stop();
   httpServer.close(() => {
     console.log('Server closed');
     process.exit(0);
