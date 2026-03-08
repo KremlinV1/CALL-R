@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import { OutcomeDecisionEngine } from '../services/outcomeDecisionEngine.js';
 import { createTelnyxService } from '../services/telnyx.js';
 import { analyzeCall, analyzeUnprocessedCalls } from '../services/callAnalysis.js';
+import { resolveCallerId } from '../services/callerId.js';
 // LiveKit + Telnyx outbound providers
 
 const router = Router();
@@ -294,7 +295,7 @@ router.get('/:id/recording', async (req: AuthRequest, res: Response) => {
 // Initiate outbound call — supports LiveKit and Telnyx providers
 router.post('/outbound', async (req: AuthRequest, res: Response) => {
   try {
-    const { agentId, toNumber, contactId, fromNumberId, fromNumber: directFromNumber, provider: requestedProvider } = req.body;
+    const { agentId, toNumber, contactId, fromNumberId, fromNumber: directFromNumber, provider: requestedProvider, callerIdProfileId } = req.body;
     const organizationId = req.user?.organizationId;
     
     if (!organizationId) {
@@ -362,6 +363,27 @@ router.post('/outbound', async (req: AuthRequest, res: Response) => {
     // Format phone number to E.164
     const formattedToNumber = toNumber.startsWith('+') ? toNumber : `+1${toNumber.replace(/\D/g, '')}`;
     
+    // ── Caller ID Resolution ─────────────────────────
+    // Resolve which number to display to the recipient
+    let callerIdProfile = null;
+    try {
+      callerIdProfile = await resolveCallerId({
+        organizationId,
+        toNumber: formattedToNumber,
+        agentId,
+        campaignId: req.body.campaignId,
+        explicitProfileId: callerIdProfileId,
+      });
+
+      if (callerIdProfile) {
+        // Override the fromNumber with the caller ID profile's display number
+        fromNumber = callerIdProfile.displayNumber;
+        console.log(`📞 Caller ID resolved: "${callerIdProfile.profileName}" → ${callerIdProfile.displayNumber} (mode: ${callerIdProfile.mode})`);
+      }
+    } catch (cidErr: any) {
+      console.warn('⚠️ Caller ID resolution failed, using raw fromNumber:', cidErr.message);
+    }
+
     // Create room/call identifier
     const roomName = `call-${crypto.randomUUID().slice(0, 8)}`;
     
@@ -378,6 +400,12 @@ router.post('/outbound', async (req: AuthRequest, res: Response) => {
       metadata: {
         roomName,
         agentName: agent.name,
+        ...(callerIdProfile ? {
+          callerIdProfileId: callerIdProfile.profileId,
+          callerIdProfileName: callerIdProfile.profileName,
+          callerIdMode: callerIdProfile.mode,
+          callerIdDisplayName: callerIdProfile.displayName,
+        } : {}),
       },
     }).returning();
 

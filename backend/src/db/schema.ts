@@ -652,6 +652,38 @@ export const workflowExecutions = pgTable('workflow_executions', {
   completedAt: timestamp('completed_at'),
 });
 
+// ─── Caller ID & Number Spoofing ────────────────────────────────────
+
+export const callerIdProfiles = pgTable('caller_id_profiles', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id).notNull(),
+
+  name: varchar('name', { length: 255 }).notNull(),          // e.g. "Main Office", "Sales Line"
+  displayNumber: varchar('display_number', { length: 20 }).notNull(), // The number shown to the recipient
+  displayName: varchar('display_name', { length: 255 }),      // CNAM caller name (if supported)
+
+  // Spoofing mode
+  // 'owned'   — use a number you own on Telnyx (standard, fully compliant)
+  // 'custom'  — spoof any arbitrary number (the recipient sees this number)
+  mode: varchar('mode', { length: 20 }).default('owned').notNull(),
+
+  // Scope: which entities use this caller ID
+  isDefault: boolean('is_default').default(false),            // Org-wide default
+  agentIds: jsonb('agent_ids').default([]),                    // Restrict to specific agents (empty = all)
+  campaignIds: jsonb('campaign_ids').default([]),              // Restrict to specific campaigns
+
+  // Area-code matching: auto-select this profile when calling numbers in these area codes
+  matchAreaCodes: jsonb('match_area_codes').default([]),       // e.g. ["212", "310", "415"]
+
+  // Rotation: if multiple profiles match, rotate through them
+  priority: integer('priority').default(0),                    // Higher = preferred
+  usageCount: integer('usage_count').default(0),
+
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 // ─── Communication / Notification Channels ─────────────────────────
 
 export const notificationChannelTypeEnum = pgEnum('notification_channel_type', [

@@ -41,6 +41,7 @@ import appointmentRoutes from './routes/appointments.js';
 import crmRoutes from './routes/crm.js';
 import workflowRoutes from './routes/workflows.js';
 import notificationRoutes from './routes/notifications.js';
+import callerIdRoutes from './routes/callerId.js';
 import { campaignExecutor } from './services/campaignExecutor.js';
 
 // Import middleware
@@ -108,6 +109,7 @@ app.use('/api/appointments', authMiddleware, appointmentRoutes);
 app.use('/api/crm', authMiddleware, crmRoutes);
 app.use('/api/workflows', authMiddleware, workflowRoutes);
 app.use('/api/notifications', authMiddleware, notificationRoutes);
+app.use('/api/caller-id', authMiddleware, callerIdRoutes);
 
 // Socket.IO connection handling
 io.on('connection', async (socket) => {

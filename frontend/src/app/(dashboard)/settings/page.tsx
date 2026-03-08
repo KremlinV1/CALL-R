@@ -242,10 +242,11 @@ export default function SettingsPage() {
       </div>
 
       <Tabs defaultValue="profile" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-8 lg:w-auto lg:inline-flex">
+        <TabsList className="grid w-full grid-cols-9 lg:w-auto lg:inline-flex">
           <TabsTrigger value="profile">Profile</TabsTrigger>
           <TabsTrigger value="organization">Organization</TabsTrigger>
           <TabsTrigger value="telephony">Telephony</TabsTrigger>
+          <TabsTrigger value="caller-id">Caller ID</TabsTrigger>
           <TabsTrigger value="crm">CRM</TabsTrigger>
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
           <TabsTrigger value="api">API Keys</TabsTrigger>
@@ -376,6 +377,27 @@ export default function SettingsPage() {
 
         {/* Telephony Settings */}
         <TelephonySettings token={token} isHydrated={isHydrated} />
+
+        {/* Caller ID */}
+        <TabsContent value="caller-id" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Caller ID & Number Spoofing</CardTitle>
+              <CardDescription>Control which number appears on outbound calls with owned or custom caller IDs</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Set up caller ID profiles with area-code matching, agent/campaign scoping, and number spoofing.
+              </p>
+              <a href="/settings/caller-id">
+                <Button>
+                  <Phone className="mr-2 h-4 w-4" />
+                  Manage Caller ID
+                </Button>
+              </a>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* CRM Integrations */}
         <TabsContent value="crm" className="space-y-6">
