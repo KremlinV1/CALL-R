@@ -233,6 +233,7 @@ router.post('/menus', async (req: AuthRequest, res: Response) => {
       maxRetries,
       invalidInputMessage,
       timeoutMessage,
+      callerIdProfileId,
       options,
     } = req.body;
 
@@ -265,6 +266,7 @@ router.post('/menus', async (req: AuthRequest, res: Response) => {
         maxRetries: maxRetries || 3,
         invalidInputMessage,
         timeoutMessage,
+        callerIdProfileId: callerIdProfileId || null,
       })
       .returning();
 
@@ -310,6 +312,7 @@ router.put('/menus/:id', async (req: AuthRequest, res: Response) => {
       maxRetries,
       invalidInputMessage,
       timeoutMessage,
+      callerIdProfileId,
       options,
     } = req.body;
 
@@ -349,6 +352,7 @@ router.put('/menus/:id', async (req: AuthRequest, res: Response) => {
         maxRetries,
         invalidInputMessage,
         timeoutMessage,
+        callerIdProfileId: callerIdProfileId !== undefined ? (callerIdProfileId || null) : undefined,
         updatedAt: new Date(),
       })
       .where(eq(ivrMenus.id, req.params.id))

@@ -49,6 +49,8 @@ import {
   Loader2,
   Star,
   Edit,
+  Shield,
+  ShieldAlert,
 } from "lucide-react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import axios from "axios"
@@ -80,6 +82,15 @@ interface IvrMenuOption {
   announcementText?: string
 }
 
+interface CallerIdProfile {
+  id: string
+  name: string
+  displayNumber: string
+  displayName: string | null
+  mode: string
+  isDefault: boolean
+}
+
 interface IvrMenu {
   id: string
   name: string
@@ -95,6 +106,8 @@ interface IvrMenu {
   maxRetries: number
   invalidInputMessage?: string
   timeoutMessage?: string
+  callerIdProfileId?: string | null
+  callerId?: { profileId: string; displayNumber: string; displayName: string | null; mode: string; profileName: string }
   optionCount?: number
   options?: IvrMenuOption[]
   createdAt: string
@@ -459,6 +472,19 @@ function IvrMenuDialog({
   const queryClient = useQueryClient()
   const isEditing = !!menu
 
+  // Fetch caller ID profiles
+  const { data: callerIdData } = useQuery({
+    queryKey: ["caller-id-profiles"],
+    queryFn: async () => {
+      const res = await axios.get(`${API_URL}/caller-id`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      return res.data
+    },
+    enabled: !!token && open,
+  })
+  const callerIdProfiles: CallerIdProfile[] = callerIdData?.profiles || []
+
   // Form state
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
@@ -470,6 +496,7 @@ function IvrMenuDialog({
   const [maxRetries, setMaxRetries] = useState(3)
   const [invalidInputMessage, setInvalidInputMessage] = useState("Sorry, I didn't understand that. Please try again.")
   const [timeoutMessage, setTimeoutMessage] = useState("I didn't receive any input. Goodbye.")
+  const [callerIdProfileId, setCallerIdProfileId] = useState<string | null>(null)
   const [options, setOptions] = useState<IvrMenuOption[]>([])
   const [isSaving, setIsSaving] = useState(false)
 
@@ -486,6 +513,7 @@ function IvrMenuDialog({
       setMaxRetries(menu.maxRetries)
       setInvalidInputMessage(menu.invalidInputMessage || "")
       setTimeoutMessage(menu.timeoutMessage || "")
+      setCallerIdProfileId(menu.callerIdProfileId || menu.callerId?.profileId || null)
       setOptions(menu.options || [])
     } else {
       setName("")
@@ -498,6 +526,7 @@ function IvrMenuDialog({
       setMaxRetries(3)
       setInvalidInputMessage("Sorry, I didn't understand that. Please try again.")
       setTimeoutMessage("I didn't receive any input. Goodbye.")
+      setCallerIdProfileId(null)
       setOptions([])
     }
   })
@@ -545,6 +574,7 @@ function IvrMenuDialog({
         maxRetries,
         invalidInputMessage,
         timeoutMessage,
+        callerIdProfileId: callerIdProfileId || null,
         options: options.map((opt) => ({
           dtmfKey: opt.dtmfKey,
           label: opt.label,
@@ -617,6 +647,48 @@ function IvrMenuDialog({
               </p>
             </div>
             <Switch checked={isDefault} onCheckedChange={setIsDefault} />
+          </div>
+
+          {/* Caller ID */}
+          <div className="space-y-2">
+            <Label>Caller ID Profile</Label>
+            <p className="text-xs text-muted-foreground">
+              Choose which number and name are displayed when this IVR transfers or makes outbound calls
+            </p>
+            {callerIdProfiles.length > 0 ? (
+              <Select
+                value={callerIdProfileId || "none"}
+                onValueChange={(v) => setCallerIdProfileId(v === "none" ? null : v)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="No caller ID (use default)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No caller ID override</SelectItem>
+                  {callerIdProfiles.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      <div className="flex items-center gap-2">
+                        {p.mode === "custom" ? (
+                          <ShieldAlert className="h-3.5 w-3.5 text-orange-500" />
+                        ) : (
+                          <Shield className="h-3.5 w-3.5 text-green-500" />
+                        )}
+                        <span>{p.name}</span>
+                        <span className="text-muted-foreground font-mono text-xs">{p.displayNumber}</span>
+                        {p.mode === "custom" && (
+                          <Badge variant="outline" className="text-[10px] bg-orange-500/10 text-orange-600 border-orange-500/20">Spoofed</Badge>
+                        )}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <p className="text-xs text-muted-foreground italic">
+                No caller ID profiles configured.{" "}
+                <a href="/settings/caller-id" className="text-primary underline">Add one in Settings → Caller ID</a>
+              </p>
+            )}
           </div>
 
           {/* Greeting */}

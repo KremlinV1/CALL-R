@@ -767,6 +767,9 @@ export const ivrMenus = pgTable('ivr_menus', {
   maxRetries: integer('max_retries').default(3),
   invalidInputMessage: text('invalid_input_message').default('Sorry, I didn\'t understand that. Please try again.'),
   timeoutMessage: text('timeout_message').default('I didn\'t receive any input. Goodbye.'),
+
+  // Caller ID — which number/name callers see when this IVR calls out or transfers
+  callerIdProfileId: uuid('caller_id_profile_id').references(() => callerIdProfiles.id),
   
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),

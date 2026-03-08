@@ -1,5 +1,5 @@
 import { db } from '../db/index.js';
-import { ivrMenus, ivrMenuOptions, ivrCallLogs, agents } from '../db/schema.js';
+import { ivrMenus, ivrMenuOptions, ivrCallLogs, agents, callerIdProfiles } from '../db/schema.js';
 import { eq, and, asc } from 'drizzle-orm';
 import { livekitService } from './livekit.js';
 
@@ -15,6 +15,14 @@ export interface IvrMenuOption {
   announcementText?: string;
 }
 
+export interface IvrCallerIdInfo {
+  profileId: string;
+  displayNumber: string;
+  displayName: string | null;
+  mode: string;
+  profileName: string;
+}
+
 export interface IvrMenu {
   id: string;
   name: string;
@@ -28,6 +36,7 @@ export interface IvrMenu {
   invalidInputMessage: string;
   timeoutMessage: string;
   options: IvrMenuOption[];
+  callerId?: IvrCallerIdInfo;
 }
 
 export interface IvrSession {
@@ -44,7 +53,7 @@ export interface IvrSession {
 const activeSessions = new Map<string, IvrSession>();
 
 class IvrService {
-  // Load a menu with its options
+  // Load a menu with its options and caller ID profile
   async getMenu(menuId: string): Promise<IvrMenu | null> {
     const [menu] = await db
       .select()
@@ -59,6 +68,26 @@ class IvrService {
       .from(ivrMenuOptions)
       .where(eq(ivrMenuOptions.menuId, menuId))
       .orderBy(asc(ivrMenuOptions.sortOrder));
+
+    // Load caller ID profile if assigned
+    let callerId: IvrCallerIdInfo | undefined;
+    if (menu.callerIdProfileId) {
+      const [profile] = await db
+        .select()
+        .from(callerIdProfiles)
+        .where(and(eq(callerIdProfiles.id, menu.callerIdProfileId), eq(callerIdProfiles.isActive, true)))
+        .limit(1);
+
+      if (profile) {
+        callerId = {
+          profileId: profile.id,
+          displayNumber: profile.displayNumber,
+          displayName: profile.displayName,
+          mode: profile.mode,
+          profileName: profile.name,
+        };
+      }
+    }
 
     return {
       id: menu.id,
@@ -80,6 +109,7 @@ class IvrService {
         actionData: (opt.actionData as Record<string, any>) || {},
         announcementText: opt.announcementText || undefined,
       })),
+      callerId,
     };
   }
 
