@@ -57,6 +57,13 @@
       "when": 1772674875188,
       "tag": "0007_wooden_king_cobra",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1772731557136,
+      "tag": "0008_next_lady_vermin",
+      "breakpoints": true
     }
   ]
 }

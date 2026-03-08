@@ -1,11 +1,13 @@
 import { Router, Response } from 'express';
 import { AuthRequest } from '../middleware/auth.js';
 import { db } from '../db/index.js';
-import { calls, agents, contacts, phoneNumbers, campaigns, campaignContacts } from '../db/schema.js';
-import { eq, and, desc, gte, lte, sql, or, ilike } from 'drizzle-orm';
+import { calls, agents, contacts, phoneNumbers, campaigns, campaignContacts, telephonyConfig } from '../db/schema.js';
+import { eq, and, desc, gte, lte, sql, or, ilike, isNull, isNotNull, inArray } from 'drizzle-orm';
 import crypto from 'crypto';
 import { OutcomeDecisionEngine } from '../services/outcomeDecisionEngine.js';
-// LiveKit-only outbound provider (DIDWW trunk via LiveKit SIP)
+import { createTelnyxService } from '../services/telnyx.js';
+import { analyzeCall, analyzeUnprocessedCalls } from '../services/callAnalysis.js';
+// LiveKit + Telnyx outbound providers
 
 const router = Router();
 
@@ -19,6 +21,18 @@ const LIVEKIT_SIP_TRUNK_INBOUND = process.env.LIVEKIT_SIP_TRUNK_INBOUND;
 // Phone numbers (legacy)
 const VONAGE_PHONE_NUMBER = process.env.VONAGE_PHONE_NUMBER || '';
 const LIVEKIT_PHONE_NUMBER = process.env.LIVEKIT_PHONE_NUMBER || '';
+
+// Telnyx configuration
+const TELNYX_API_KEY = process.env.TELNYX_API_KEY || '';
+const TELNYX_CONNECTION_ID = process.env.TELNYX_CONNECTION_ID || '';
+
+// Helper to get Telnyx service
+function getTelnyxService() {
+  if (!TELNYX_API_KEY) {
+    throw new Error('TELNYX_API_KEY not configured');
+  }
+  return createTelnyxService(TELNYX_API_KEY);
+}
 
 // Helper to create LiveKit API client
 async function getLiveKitApi() {
@@ -277,10 +291,10 @@ router.get('/:id/recording', async (req: AuthRequest, res: Response) => {
   }
 });
 
-// Initiate outbound call — supports both Vogent and LiveKit providers
+// Initiate outbound call — supports LiveKit and Telnyx providers
 router.post('/outbound', async (req: AuthRequest, res: Response) => {
   try {
-    const { agentId, toNumber, contactId, fromNumberId, provider: requestedProvider } = req.body;
+    const { agentId, toNumber, contactId, fromNumberId, fromNumber: directFromNumber, provider: requestedProvider } = req.body;
     const organizationId = req.user?.organizationId;
     
     if (!organizationId) {
@@ -304,15 +318,33 @@ router.post('/outbound', async (req: AuthRequest, res: Response) => {
     
     const agent = agentResult[0];
     
-    // LiveKit-only
-    const callProvider = 'livekit';
-    if (!(LIVEKIT_URL && LIVEKIT_API_KEY && LIVEKIT_SIP_TRUNK_OUTBOUND)) {
-      return res.status(400).json({ error: 'LiveKit SIP trunk not configured. Set LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_SIP_TRUNK_OUTBOUND.' });
+    // Determine provider: use requested provider or check org config, default to livekit
+    let callProvider: 'livekit' | 'telnyx' = 'livekit';
+    if (requestedProvider === 'telnyx' || requestedProvider === 'livekit') {
+      callProvider = requestedProvider;
+    } else {
+      // Check org telephony config
+      const configResult = await db
+        .select()
+        .from(telephonyConfig)
+        .where(eq(telephonyConfig.organizationId, organizationId))
+        .limit(1);
+      if (configResult.length > 0 && configResult[0].provider === 'telnyx') {
+        callProvider = 'telnyx';
+      }
     }
     
-    // Get from number (optional; LiveKit trunk CLI typically configured server-side)
-    let fromNumber = '';
-    if (fromNumberId) {
+    // Validate provider is configured
+    if (callProvider === 'livekit' && !(LIVEKIT_URL && LIVEKIT_API_KEY && LIVEKIT_SIP_TRUNK_OUTBOUND)) {
+      return res.status(400).json({ error: 'LiveKit SIP trunk not configured. Set LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_SIP_TRUNK_OUTBOUND.' });
+    }
+    if (callProvider === 'telnyx' && !TELNYX_API_KEY) {
+      return res.status(400).json({ error: 'Telnyx not configured. Set TELNYX_API_KEY and TELNYX_CONNECTION_ID.' });
+    }
+    
+    // Get from number — accept direct number or look up by ID
+    let fromNumber = directFromNumber || '';
+    if (!fromNumber && fromNumberId) {
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(fromNumberId);
       const numberResult = await db
         .select()
@@ -330,7 +362,7 @@ router.post('/outbound', async (req: AuthRequest, res: Response) => {
     // Format phone number to E.164
     const formattedToNumber = toNumber.startsWith('+') ? toNumber : `+1${toNumber.replace(/\D/g, '')}`;
     
-    // Create room name for the call
+    // Create room/call identifier
     const roomName = `call-${crypto.randomUUID().slice(0, 8)}`;
     
     // Insert call record
@@ -349,57 +381,119 @@ router.post('/outbound', async (req: AuthRequest, res: Response) => {
       },
     }).returning();
 
-    // ── LiveKit provider (only) ─────────────────────────
-    try {
-      console.log('🔧 LiveKit config:', {
-        hasApiKey: !!LIVEKIT_API_KEY,
-        hasApiSecret: !!LIVEKIT_API_SECRET,
-        trunkId: LIVEKIT_SIP_TRUNK_OUTBOUND,
-        url: LIVEKIT_URL,
-      });
-      
-      const { roomService, sipClient } = await getLiveKitApi();
-      
-      console.log('📞 Creating room:', roomName);
-      await roomService.createRoom({
-        name: roomName,
-        metadata: JSON.stringify({
-          callId: newCall.id,
-          agentId,
-          direction: 'outbound',
-        }),
-      });
-      console.log('✅ Room created');
-      
-      await db.update(calls)
-        .set({ status: 'ringing', startedAt: new Date() })
-        .where(eq(calls.id, newCall.id));
-      
-      console.log('📞 Creating SIP participant:', {
-        trunkId: LIVEKIT_SIP_TRUNK_OUTBOUND,
-        toNumber: formattedToNumber,
-        roomName,
-      });
-      
-      const sipResult = await sipClient.createSipParticipant(
-        LIVEKIT_SIP_TRUNK_OUTBOUND!,
-        formattedToNumber,
-        roomName,
-        {
-          participantIdentity: formattedToNumber,
-          participantName: 'Customer',
-        }
-      );
-      console.log('✅ SIP participant created:', sipResult);
-      
-      await db.update(calls)
-        .set({ status: 'in_progress', answeredAt: new Date() })
-        .where(eq(calls.id, newCall.id));
-    } catch (livekitError) {
-      console.error('❌ LiveKit error:', livekitError);
-      await db.update(calls)
-        .set({ status: 'failed', metadata: { ...(newCall.metadata as object), error: String(livekitError) } })
-        .where(eq(calls.id, newCall.id));
+    // ── Telnyx provider ─────────────────────────
+    if (callProvider === 'telnyx') {
+      try {
+        console.log('🔧 Telnyx config:', {
+          hasApiKey: !!TELNYX_API_KEY,
+          connectionId: TELNYX_CONNECTION_ID,
+        });
+        
+        const telnyx = getTelnyxService();
+        const webhookUrl = `${process.env.API_URL || 'https://call-r.onrender.com'}/api/webhooks/telnyx`;
+        
+        console.log('📞 Creating Telnyx call:', {
+          to: formattedToNumber,
+          from: fromNumber,
+          connectionId: TELNYX_CONNECTION_ID,
+        });
+        
+        // Build AMD mode based on agent voicemail settings
+        const amdMode = agent.voicemailEnabled ? 'detect_beep' : 'detect';
+
+        const telnyxCall = await telnyx.createCall({
+          to: formattedToNumber,
+          from: fromNumber,
+          connectionId: TELNYX_CONNECTION_ID,
+          webhookUrl,
+          clientState: JSON.stringify({
+            callId: newCall.id,
+            agentId,
+            organizationId,
+            voicemail: {
+              enabled: agent.voicemailEnabled,
+              action: agent.voicemailAction || 'leave_message',
+              message: agent.voicemailMessage || null,
+            },
+          }),
+          answeringMachineDetection: amdMode,
+        });
+        
+        console.log('✅ Telnyx call created:', telnyxCall.call_control_id);
+        
+        await db.update(calls)
+          .set({ 
+            status: 'ringing', 
+            startedAt: new Date(),
+            externalId: telnyxCall.call_control_id,
+            metadata: {
+              ...(newCall.metadata as object),
+              telnyxCallControlId: telnyxCall.call_control_id,
+              telnyxCallSessionId: telnyxCall.call_session_id,
+            },
+          })
+          .where(eq(calls.id, newCall.id));
+      } catch (telnyxError: any) {
+        const errDetails = telnyxError?.response?.data || telnyxError?.message || telnyxError;
+        console.error('❌ Telnyx error:', JSON.stringify(errDetails, null, 2));
+        await db.update(calls)
+          .set({ status: 'failed', metadata: { ...(newCall.metadata as object), error: String(telnyxError) } })
+          .where(eq(calls.id, newCall.id));
+      }
+    }
+    // ── LiveKit provider ─────────────────────────
+    else {
+      try {
+        console.log('🔧 LiveKit config:', {
+          hasApiKey: !!LIVEKIT_API_KEY,
+          hasApiSecret: !!LIVEKIT_API_SECRET,
+          trunkId: LIVEKIT_SIP_TRUNK_OUTBOUND,
+          url: LIVEKIT_URL,
+        });
+        
+        const { roomService, sipClient } = await getLiveKitApi();
+        
+        console.log('📞 Creating room:', roomName);
+        await roomService.createRoom({
+          name: roomName,
+          metadata: JSON.stringify({
+            callId: newCall.id,
+            agentId,
+            direction: 'outbound',
+          }),
+        });
+        console.log('✅ Room created');
+        
+        await db.update(calls)
+          .set({ status: 'ringing', startedAt: new Date() })
+          .where(eq(calls.id, newCall.id));
+        
+        console.log('📞 Creating SIP participant:', {
+          trunkId: LIVEKIT_SIP_TRUNK_OUTBOUND,
+          toNumber: formattedToNumber,
+          roomName,
+        });
+        
+        const sipResult = await sipClient.createSipParticipant(
+          LIVEKIT_SIP_TRUNK_OUTBOUND!,
+          formattedToNumber,
+          roomName,
+          {
+            participantIdentity: formattedToNumber,
+            participantName: 'Customer',
+          }
+        );
+        console.log('✅ SIP participant created:', sipResult);
+        
+        await db.update(calls)
+          .set({ status: 'in_progress', answeredAt: new Date() })
+          .where(eq(calls.id, newCall.id));
+      } catch (livekitError) {
+        console.error('❌ LiveKit error:', livekitError);
+        await db.update(calls)
+          .set({ status: 'failed', metadata: { ...(newCall.metadata as object), error: String(livekitError) } })
+          .where(eq(calls.id, newCall.id));
+      }
     }
     
     // Emit socket event
@@ -595,6 +689,91 @@ router.post('/webhook/status', async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Error updating call status:', error);
     res.status(500).json({ error: 'Failed to update call status' });
+  }
+});
+
+// POST /api/calls/analyze-batch - Analyze all unprocessed calls
+// MUST be before /:id routes to avoid Express treating "analyze-batch" as an :id param
+router.post('/analyze-batch', async (req: AuthRequest, res: Response) => {
+  try {
+    const organizationId = req.user?.organizationId;
+    if (!organizationId) return res.status(401).json({ error: 'Unauthorized' });
+
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(400).json({ error: 'OpenAI API key not configured. Add OPENAI_API_KEY to your .env file.' });
+    }
+
+    const analyzed = await analyzeUnprocessedCalls();
+    res.json({ success: true, analyzed });
+  } catch (error) {
+    console.error('Error in batch analysis:', error);
+    res.status(500).json({ error: 'Failed to run batch analysis' });
+  }
+});
+
+// POST /api/calls/:id/analyze - Analyze a single call with AI
+router.post('/:id/analyze', async (req: AuthRequest, res: Response) => {
+  try {
+    const organizationId = req.user?.organizationId;
+    if (!organizationId) return res.status(401).json({ error: 'Unauthorized' });
+
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(400).json({ error: 'OpenAI API key not configured. Add OPENAI_API_KEY to your .env file.' });
+    }
+
+    // Verify call belongs to org
+    const [call] = await db
+      .select()
+      .from(calls)
+      .where(and(eq(calls.id, req.params.id), eq(calls.organizationId, organizationId)))
+      .limit(1);
+
+    if (!call) return res.status(404).json({ error: 'Call not found' });
+    if (!call.transcript) return res.status(400).json({ error: 'Call has no transcript to analyze' });
+
+    const result = await analyzeCall(call.id);
+    if (!result) return res.status(500).json({ error: 'Analysis failed' });
+
+    // Emit socket event
+    const io = req.app.get('io');
+    io?.to(organizationId).emit('call:analyzed', { callId: call.id, ...result });
+
+    res.json({ success: true, analysis: result });
+  } catch (error) {
+    console.error('Error analyzing call:', error);
+    res.status(500).json({ error: 'Failed to analyze call' });
+  }
+});
+
+// GET /api/calls/:id/analysis - Get analysis results for a call
+router.get('/:id/analysis', async (req: AuthRequest, res: Response) => {
+  try {
+    const organizationId = req.user?.organizationId;
+    if (!organizationId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const [call] = await db
+      .select({
+        id: calls.id,
+        summary: calls.summary,
+        sentiment: calls.sentiment,
+        outcome: calls.outcome,
+        qualityScore: calls.qualityScore,
+        extractedData: calls.extractedData,
+        transcript: calls.transcript,
+      })
+      .from(calls)
+      .where(and(eq(calls.id, req.params.id), eq(calls.organizationId, organizationId)))
+      .limit(1);
+
+    if (!call) return res.status(404).json({ error: 'Call not found' });
+
+    res.json({
+      analyzed: !!call.summary,
+      ...call,
+    });
+  } catch (error) {
+    console.error('Error fetching call analysis:', error);
+    res.status(500).json({ error: 'Failed to fetch call analysis' });
   }
 });
 

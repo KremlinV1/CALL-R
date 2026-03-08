@@ -277,7 +277,7 @@ export const aiProviderKeys = pgTable('ai_provider_keys', {
 });
 
 // Telephony Provider Configuration
-export const telephonyProviderEnum = pgEnum('telephony_provider', ['livekit_sip']);
+export const telephonyProviderEnum = pgEnum('telephony_provider', ['livekit_sip', 'telnyx']);
 
 export const telephonyConfig = pgTable('telephony_config', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -295,6 +295,11 @@ export const telephonyConfig = pgTable('telephony_config', {
   
   // LiveKit SIP specific
   livekitSipUri: varchar('livekit_sip_uri', { length: 255 }),
+  
+  // Telnyx specific
+  telnyxConnectionId: varchar('telnyx_connection_id', { length: 50 }),
+  telnyxSipUsername: varchar('telnyx_sip_username', { length: 100 }),
+  encryptedTelnyxSipPassword: text('encrypted_telnyx_sip_password'),
   
   // SignalWire specific - Space URL (e.g., "myspace" for myspace.signalwire.com) (legacy/ununsed in LiveKit-only)
   signalwireSpaceUrl: varchar('signalwire_space_url', { length: 255 }),
@@ -346,6 +351,354 @@ export const poolPhoneNumbers = pgTable('pool_phone_numbers', {
   
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Appointment Status Enum
+export const appointmentStatusEnum = pgEnum('appointment_status', ['scheduled', 'confirmed', 'completed', 'cancelled', 'no_show', 'rescheduled']);
+
+// Appointments
+export const appointments = pgTable('appointments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id).notNull(),
+  contactId: uuid('contact_id').references(() => contacts.id),
+  callId: uuid('call_id').references(() => calls.id),
+  agentId: uuid('agent_id').references(() => agents.id),
+
+  // Appointment details
+  title: varchar('title', { length: 255 }).notNull(),
+  description: text('description'),
+  status: appointmentStatusEnum('status').default('scheduled').notNull(),
+
+  // Scheduling
+  startTime: timestamp('start_time').notNull(),
+  endTime: timestamp('end_time').notNull(),
+  timezone: varchar('timezone', { length: 100 }).default('America/New_York').notNull(),
+  durationMinutes: integer('duration_minutes').default(30).notNull(),
+
+  // Contact info
+  contactName: varchar('contact_name', { length: 255 }),
+  contactPhone: varchar('contact_phone', { length: 20 }),
+  contactEmail: varchar('contact_email', { length: 255 }),
+
+  // Location / meeting
+  locationType: varchar('location_type', { length: 50 }).default('phone'), // phone, video, in_person
+  locationDetails: text('location_details'), // address, meeting link, etc.
+
+  // Reminders
+  reminderSent: boolean('reminder_sent').default(false),
+  reminderSentAt: timestamp('reminder_sent_at'),
+  confirmationSent: boolean('confirmation_sent').default(false),
+
+  // External calendar sync
+  externalCalendarId: varchar('external_calendar_id', { length: 255 }),
+  externalEventId: varchar('external_event_id', { length: 255 }),
+
+  // Notes
+  notes: text('notes'),
+  metadata: jsonb('metadata').default({}),
+
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Availability Schedules (per org — defines bookable hours)
+export const availabilitySchedules = pgTable('availability_schedules', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id).notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+  isDefault: boolean('is_default').default(false),
+  timezone: varchar('timezone', { length: 100 }).default('America/New_York').notNull(),
+
+  // Weekly schedule: { "monday": [{ start: "09:00", end: "17:00" }], ... }
+  weeklyHours: jsonb('weekly_hours').default({}).notNull(),
+
+  // Booking rules
+  slotDurationMinutes: integer('slot_duration_minutes').default(30).notNull(),
+  bufferMinutes: integer('buffer_minutes').default(15), // gap between appointments
+  minAdvanceHours: integer('min_advance_hours').default(1), // min hours ahead to book
+  maxAdvanceDays: integer('max_advance_days').default(30), // max days into future
+  maxBookingsPerDay: integer('max_bookings_per_day').default(20),
+
+  // Date overrides (holidays, special hours): [{ date: "2025-12-25", available: false }, ...]
+  dateOverrides: jsonb('date_overrides').default([]),
+
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Calendar Integrations (Google, Outlook)
+export const calendarIntegrations = pgTable('calendar_integrations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id).notNull(),
+  provider: varchar('provider', { length: 50 }).notNull(), // google, outlook, cal_com
+  name: varchar('name', { length: 255 }).notNull(),
+
+  // OAuth tokens (encrypted)
+  encryptedAccessToken: text('encrypted_access_token'),
+  encryptedRefreshToken: text('encrypted_refresh_token'),
+  tokenExpiresAt: timestamp('token_expires_at'),
+
+  // Calendar info
+  calendarId: varchar('calendar_id', { length: 255 }), // specific calendar within account
+  calendarName: varchar('calendar_name', { length: 255 }),
+  email: varchar('email', { length: 255 }),
+
+  // Sync settings
+  syncEnabled: boolean('sync_enabled').default(true),
+  twoWaySync: boolean('two_way_sync').default(true), // also block time from external events
+  lastSyncAt: timestamp('last_sync_at'),
+
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// CRM Provider Enum
+export const crmProviderEnum = pgEnum('crm_provider', ['salesforce', 'hubspot', 'pipedrive']);
+
+// CRM Integrations
+export const crmIntegrations = pgTable('crm_integrations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id).notNull(),
+  provider: crmProviderEnum('provider').notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+
+  // OAuth / API credentials (encrypted)
+  encryptedAccessToken: text('encrypted_access_token'),
+  encryptedRefreshToken: text('encrypted_refresh_token'),
+  encryptedApiKey: text('encrypted_api_key'), // For API-key based auth (Pipedrive)
+  tokenExpiresAt: timestamp('token_expires_at'),
+
+  // Instance info
+  instanceUrl: varchar('instance_url', { length: 500 }), // Salesforce instance URL, HubSpot portal, Pipedrive domain
+  accountId: varchar('account_id', { length: 255 }),
+  accountName: varchar('account_name', { length: 255 }),
+
+  // Sync settings
+  syncContacts: boolean('sync_contacts').default(true),
+  syncCalls: boolean('sync_calls').default(true),
+  syncAppointments: boolean('sync_appointments').default(false),
+  autoCreateContacts: boolean('auto_create_contacts').default(false), // Create CRM contacts from new call contacts
+  autoLogCalls: boolean('auto_log_calls').default(true), // Log completed calls to CRM
+
+  // Field mappings: { "phone": "Phone", "email": "Email", ... }
+  contactFieldMapping: jsonb('contact_field_mapping').default({}),
+  callFieldMapping: jsonb('call_field_mapping').default({}),
+
+  // Status
+  isActive: boolean('is_active').default(true),
+  lastSyncAt: timestamp('last_sync_at'),
+  lastSyncStatus: varchar('last_sync_status', { length: 50 }), // success, error, in_progress
+  lastSyncError: text('last_sync_error'),
+
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// CRM Sync Logs
+export const crmSyncLogs = pgTable('crm_sync_logs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  integrationId: uuid('integration_id').references(() => crmIntegrations.id).notNull(),
+  organizationId: uuid('organization_id').references(() => organizations.id).notNull(),
+
+  // Sync details
+  syncType: varchar('sync_type', { length: 50 }).notNull(), // contacts, calls, appointments, full
+  direction: varchar('direction', { length: 20 }).notNull(), // push, pull, bidirectional
+  status: varchar('status', { length: 50 }).notNull(), // started, completed, failed
+
+  // Stats
+  recordsProcessed: integer('records_processed').default(0),
+  recordsCreated: integer('records_created').default(0),
+  recordsUpdated: integer('records_updated').default(0),
+  recordsFailed: integer('records_failed').default(0),
+
+  // Error info
+  errors: jsonb('errors').default([]), // Array of { record, error }
+
+  startedAt: timestamp('started_at').defaultNow().notNull(),
+  completedAt: timestamp('completed_at'),
+});
+
+// CRM Contact Mappings (link local contacts to CRM records)
+export const crmContactMappings = pgTable('crm_contact_mappings', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  integrationId: uuid('integration_id').references(() => crmIntegrations.id).notNull(),
+  contactId: uuid('contact_id').references(() => contacts.id).notNull(),
+  crmRecordId: varchar('crm_record_id', { length: 255 }).notNull(), // ID in the CRM system
+  crmRecordType: varchar('crm_record_type', { length: 100 }).default('contact'), // contact, lead, person, deal
+  lastSyncedAt: timestamp('last_synced_at'),
+  metadata: jsonb('metadata').default({}),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// ─── Multi-Agent Workflows ──────────────────────────────────────────
+
+// Workflow Status
+export const workflowStatusEnum = pgEnum('workflow_status', ['draft', 'active', 'paused', 'archived']);
+
+// Workflow Node Types
+export const workflowNodeTypeEnum = pgEnum('workflow_node_type', [
+  'start',           // Entry point
+  'agent',           // Connect to AI agent
+  'condition',       // Conditional branch (based on sentiment, outcome, keyword, etc.)
+  'transfer',        // Transfer to phone/agent
+  'hangup',          // End call
+  'wait',            // Pause/hold
+  'play_message',    // Play TTS or audio
+  'collect_input',   // Gather DTMF or speech input
+  'webhook',         // Fire external webhook
+  'set_variable',    // Set a context variable
+  'escalate',        // Escalate to human supervisor
+]);
+
+// Workflows (the top-level definition)
+export const workflows = pgTable('workflows', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id).notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+  description: text('description'),
+  status: workflowStatusEnum('status').default('draft').notNull(),
+  version: integer('version').default(1).notNull(),
+
+  // Entry config
+  triggerType: varchar('trigger_type', { length: 50 }).default('inbound_call'), // inbound_call, outbound_call, manual, scheduled
+  triggerConfig: jsonb('trigger_config').default({}), // e.g. { phoneNumbers: [...], agentIds: [...] }
+
+  // Canvas layout (for drag-drop UI)
+  canvasData: jsonb('canvas_data').default({}), // { nodes: [...], edges: [...], viewport: {...} }
+
+  // Default context variables
+  defaultContext: jsonb('default_context').default({}),
+
+  // Stats
+  totalExecutions: integer('total_executions').default(0),
+  successfulExecutions: integer('successful_executions').default(0),
+
+  isTemplate: boolean('is_template').default(false),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Workflow Nodes (individual steps)
+export const workflowNodes = pgTable('workflow_nodes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workflowId: uuid('workflow_id').references(() => workflows.id, { onDelete: 'cascade' }).notNull(),
+
+  nodeType: workflowNodeTypeEnum('node_type').notNull(),
+  label: varchar('label', { length: 255 }).notNull(),
+
+  // Node-specific config (JSON for flexibility)
+  // agent: { agentId, maxDurationSeconds, contextHandoff }
+  // condition: { field, operator, value, ... }
+  // transfer: { destination, type: 'cold'|'warm', whisper }
+  // play_message: { text, voice, language }
+  // collect_input: { prompt, inputType: 'dtmf'|'speech', maxDigits }
+  // webhook: { url, method, headers, body }
+  // set_variable: { key, value }
+  // escalate: { reason, notifyChannels }
+  config: jsonb('config').default({}).notNull(),
+
+  // Position on canvas
+  positionX: integer('position_x').default(0),
+  positionY: integer('position_y').default(0),
+
+  // Context preservation: which variables to pass to next node
+  preserveContext: jsonb('preserve_context').default([]), // Array of variable names
+
+  // Timeout / fallback
+  timeoutSeconds: integer('timeout_seconds'),
+  timeoutNodeId: uuid('timeout_node_id'), // Node to go to on timeout
+
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Workflow Edges (connections between nodes)
+export const workflowEdges = pgTable('workflow_edges', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workflowId: uuid('workflow_id').references(() => workflows.id, { onDelete: 'cascade' }).notNull(),
+  sourceNodeId: uuid('source_node_id').references(() => workflowNodes.id, { onDelete: 'cascade' }).notNull(),
+  targetNodeId: uuid('target_node_id').references(() => workflowNodes.id, { onDelete: 'cascade' }).notNull(),
+
+  // For condition nodes: which output branch
+  conditionLabel: varchar('condition_label', { length: 100 }), // e.g. "true", "false", "timeout", "digit_1"
+  conditionValue: varchar('condition_value', { length: 255 }), // The value that triggers this edge
+
+  sortOrder: integer('sort_order').default(0),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// Workflow Executions (runtime instances)
+export const workflowExecutions = pgTable('workflow_executions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workflowId: uuid('workflow_id').references(() => workflows.id).notNull(),
+  organizationId: uuid('organization_id').references(() => organizations.id).notNull(),
+  callId: uuid('call_id').references(() => calls.id),
+
+  status: varchar('status', { length: 50 }).default('running').notNull(), // running, completed, failed, cancelled
+  currentNodeId: uuid('current_node_id'),
+
+  // Runtime context (variables accumulated during execution)
+  context: jsonb('context').default({}).notNull(),
+
+  // Execution trace: array of { nodeId, nodeType, enteredAt, exitedAt, result }
+  trace: jsonb('trace').default([]).notNull(),
+
+  // Error info
+  error: text('error'),
+
+  startedAt: timestamp('started_at').defaultNow().notNull(),
+  completedAt: timestamp('completed_at'),
+});
+
+// ─── Communication / Notification Channels ─────────────────────────
+
+export const notificationChannelTypeEnum = pgEnum('notification_channel_type', [
+  'slack', 'email', 'sms', 'teams', 'discord', 'webhook',
+]);
+
+export const notificationChannels = pgTable('notification_channels', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id).notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+  channelType: notificationChannelTypeEnum('channel_type').notNull(),
+
+  // Channel-specific config (encrypted where appropriate)
+  // slack:   { webhookUrl, channel, botToken? }
+  // email:   { provider: 'sendgrid'|'postmark'|'ses', apiKey, fromEmail, fromName }
+  // sms:     { provider: 'telnyx'|'twilio', apiKey, fromNumber }
+  // teams:   { webhookUrl }
+  // discord: { webhookUrl }
+  // webhook: { url, method, headers, secret }
+  config: jsonb('config').default({}).notNull(),
+
+  // Event subscriptions: which events trigger this channel
+  // e.g. ['call.completed', 'call.failed', 'campaign.completed', 'appointment.booked']
+  subscribedEvents: jsonb('subscribed_events').default([]),
+
+  // Filtering
+  agentIds: jsonb('agent_ids').default([]),         // Empty = all agents
+  campaignIds: jsonb('campaign_ids').default([]),    // Empty = all campaigns
+
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export const notificationLogs = pgTable('notification_logs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  channelId: uuid('channel_id').references(() => notificationChannels.id).notNull(),
+  organizationId: uuid('organization_id').references(() => organizations.id).notNull(),
+
+  eventType: varchar('event_type', { length: 100 }).notNull(),
+  payload: jsonb('payload').default({}),
+
+  status: varchar('status', { length: 50 }).notNull(), // sent, failed, pending
+  error: text('error'),
+  responseCode: integer('response_code'),
+
+  sentAt: timestamp('sent_at').defaultNow().notNull(),
 });
 
 // IVR Action Types

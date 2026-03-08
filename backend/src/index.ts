@@ -35,6 +35,12 @@ import phoneNumbersRoutes from './routes/phoneNumbers.js';
 import livekitRoutes from './routes/livekit.js';
 import voiceRoutes from './routes/voice.js';
 import ivrRoutes from './routes/ivr.js';
+import telnyxWebhookRoutes from './routes/webhooks/telnyx.js';
+import transferRoutes from './routes/transfers.js';
+import appointmentRoutes from './routes/appointments.js';
+import crmRoutes from './routes/crm.js';
+import workflowRoutes from './routes/workflows.js';
+import notificationRoutes from './routes/notifications.js';
 import { campaignExecutor } from './services/campaignExecutor.js';
 
 // Import middleware
@@ -81,6 +87,9 @@ app.get('/health', (req, res) => {
 // Public routes
 app.use('/api/auth', authLimiter, authRoutes);
 
+// Webhook routes (no auth - verified by provider signatures)
+app.use('/api/webhooks/telnyx', telnyxWebhookRoutes);
+
 // Protected routes
 app.use('/api/agents', authMiddleware, agentsRoutes);
 app.use('/api/campaigns', authMiddleware, campaignsRoutes);
@@ -94,6 +103,11 @@ app.use('/api/phone-numbers', authMiddleware, phoneNumbersRoutes);
 app.use('/api/livekit', authMiddleware, livekitRoutes);
 app.use('/api/voice', authMiddleware, voiceRoutes);
 app.use('/api/ivr', authMiddleware, ivrRoutes);
+app.use('/api/transfers', authMiddleware, transferRoutes);
+app.use('/api/appointments', authMiddleware, appointmentRoutes);
+app.use('/api/crm', authMiddleware, crmRoutes);
+app.use('/api/workflows', authMiddleware, workflowRoutes);
+app.use('/api/notifications', authMiddleware, notificationRoutes);
 
 // Socket.IO connection handling
 io.on('connection', async (socket) => {

@@ -33,6 +33,7 @@ import {
   PhoneIncoming,
   PhoneOutgoing,
   PhoneMissed,
+  PhoneForwarded,
   Search,
   Play,
   Download,
@@ -44,7 +45,10 @@ import {
   MessageSquare,
   Loader2,
   RefreshCw,
+  ArrowRightLeft,
+  X,
 } from "lucide-react"
+import { Textarea } from "@/components/ui/textarea"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { useAuthStore } from "@/stores/auth-store"
@@ -515,6 +519,8 @@ export default function CallsPage() {
               <Tabs defaultValue="summary" className="mt-4">
                 <TabsList>
                   <TabsTrigger value="summary">Summary</TabsTrigger>
+                  <TabsTrigger value="analysis">AI Analysis</TabsTrigger>
+                  <TabsTrigger value="transfer">Transfer</TabsTrigger>
                   <TabsTrigger value="transcript">Transcript</TabsTrigger>
                   <TabsTrigger value="recording">Recording</TabsTrigger>
                 </TabsList>
@@ -558,7 +564,7 @@ export default function CallsPage() {
                   <div className="space-y-2">
                     <p className="text-sm text-muted-foreground">AI Summary</p>
                     <div className="p-4 bg-muted rounded-lg">
-                      <p>{selectedCall.summary || 'No summary available'}</p>
+                      <p>{selectedCall.summary || 'No summary available. Go to the AI Analysis tab to analyze this call.'}</p>
                     </div>
                   </div>
                   {selectedCall.outcome && (
@@ -567,6 +573,15 @@ export default function CallsPage() {
                       <Badge>{selectedCall.outcome}</Badge>
                     </div>
                   )}
+                </TabsContent>
+                <TabsContent value="analysis" className="space-y-4 mt-4">
+                  <CallAnalysisPanel callId={selectedCall.id} call={selectedCall} token={token} onAnalyzed={(result) => {
+                    setSelectedCall({ ...selectedCall, ...result })
+                    queryClient.invalidateQueries({ queryKey: ['calls'] })
+                  }} />
+                </TabsContent>
+                <TabsContent value="transfer" className="space-y-4 mt-4">
+                  <CallTransferPanel callId={selectedCall.id} call={selectedCall} token={token} />
                 </TabsContent>
                 <TabsContent value="transcript" className="mt-4">
                   <div className="p-4 bg-muted rounded-lg max-h-96 overflow-y-auto">
@@ -723,6 +738,292 @@ export default function CallsPage() {
           >
             Next
           </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CallTransferPanel({ callId, call, token }: {
+  callId: string
+  call: Call
+  token: string | null
+}) {
+  const [targetNumber, setTargetNumber] = useState("")
+  const [whisperMessage, setWhisperMessage] = useState("")
+  const [transferring, setTransferring] = useState(false)
+  const [transferStatus, setTransferStatus] = useState<string | null>(null)
+
+  const isActive = ['in_progress', 'ringing'].includes(call.status)
+  const transferMeta = (call.metadata as any)?.transfer
+
+  const handleColdTransfer = async () => {
+    if (!token || !targetNumber) return
+    setTransferring(true)
+    setTransferStatus(null)
+    try {
+      await axios.post(`${API_URL}/transfers/cold`, { callId, targetNumber }, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      setTransferStatus('Cold transfer initiated')
+      toast.success('Cold transfer initiated')
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Cold transfer failed')
+      setTransferStatus(null)
+    } finally {
+      setTransferring(false)
+    }
+  }
+
+  const handleWarmTransfer = async () => {
+    if (!token || !targetNumber) return
+    setTransferring(true)
+    setTransferStatus(null)
+    try {
+      await axios.post(`${API_URL}/transfers/warm`, {
+        callId,
+        targetNumber,
+        whisperMessage: whisperMessage || undefined,
+      }, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      setTransferStatus('Calling transfer target...')
+      toast.success('Warm transfer initiated — calling target')
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Warm transfer failed')
+      setTransferStatus(null)
+    } finally {
+      setTransferring(false)
+    }
+  }
+
+  const handleCancel = async () => {
+    if (!token) return
+    try {
+      await axios.post(`${API_URL}/transfers/cancel`, { callId }, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      setTransferStatus(null)
+      toast.success('Transfer cancelled')
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Failed to cancel transfer')
+    }
+  }
+
+  if (!isActive) {
+    return (
+      <div className="text-center py-8 border rounded-lg border-dashed">
+        <PhoneForwarded className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
+        <h3 className="text-lg font-semibold mb-2">Call Not Active</h3>
+        <p className="text-sm text-muted-foreground">
+          Transfers can only be initiated on active calls (status: {call.status}).
+        </p>
+        {transferMeta && (
+          <div className="mt-4 p-3 bg-muted rounded-lg text-sm text-left max-w-sm mx-auto">
+            <p className="font-medium mb-1">Previous Transfer</p>
+            <p>Type: <span className="capitalize">{transferMeta.type}</span></p>
+            <p>Target: {transferMeta.targetNumber}</p>
+            <p>Status: <span className="capitalize">{transferMeta.status}</span></p>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      {transferStatus && (
+        <div className="flex items-center justify-between p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+          <div className="flex items-center gap-2 text-sm text-blue-600">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {transferStatus}
+          </div>
+          <Button variant="ghost" size="sm" onClick={handleCancel}>
+            <X className="h-4 w-4 mr-1" />
+            Cancel
+          </Button>
+        </div>
+      )}
+
+      <div className="space-y-3">
+        <div className="space-y-2">
+          <Label>Target Phone Number</Label>
+          <Input
+            placeholder="+1 (555) 123-4567"
+            value={targetNumber}
+            onChange={(e) => setTargetNumber(e.target.value)}
+            disabled={transferring}
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label>Whisper Message <span className="text-muted-foreground text-xs">(warm transfer only, optional)</span></Label>
+          <Textarea
+            placeholder="e.g. 'I have a customer on the line asking about their account renewal.'"
+            value={whisperMessage}
+            onChange={(e) => setWhisperMessage(e.target.value)}
+            disabled={transferring}
+            rows={2}
+          />
+          <p className="text-xs text-muted-foreground">
+            This message is spoken to the transfer target before the caller is connected.
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 pt-2">
+        <div className="p-4 border rounded-lg space-y-3">
+          <div>
+            <h4 className="font-semibold flex items-center gap-2">
+              <PhoneForwarded className="h-4 w-4" />
+              Cold Transfer
+            </h4>
+            <p className="text-xs text-muted-foreground mt-1">
+              Direct transfer. The caller is connected to the target immediately. AI agent drops off.
+            </p>
+          </div>
+          <Button
+            className="w-full"
+            variant="outline"
+            onClick={handleColdTransfer}
+            disabled={transferring || !targetNumber}
+          >
+            {transferring ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PhoneForwarded className="mr-2 h-4 w-4" />}
+            Cold Transfer
+          </Button>
+        </div>
+
+        <div className="p-4 border rounded-lg space-y-3">
+          <div>
+            <h4 className="font-semibold flex items-center gap-2">
+              <ArrowRightLeft className="h-4 w-4" />
+              Warm Transfer
+            </h4>
+            <p className="text-xs text-muted-foreground mt-1">
+              Calls the target first. Plays whisper message, then bridges both parties together.
+            </p>
+          </div>
+          <Button
+            className="w-full"
+            onClick={handleWarmTransfer}
+            disabled={transferring || !targetNumber}
+          >
+            {transferring ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRightLeft className="mr-2 h-4 w-4" />}
+            Warm Transfer
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CallAnalysisPanel({ callId, call, token, onAnalyzed }: {
+  callId: string
+  call: Call
+  token: string | null
+  onAnalyzed: (result: Partial<Call>) => void
+}) {
+  const [analyzing, setAnalyzing] = useState(false)
+
+  const handleAnalyze = async () => {
+    if (!token) return
+    setAnalyzing(true)
+    try {
+      const res = await axios.post(`${API_URL}/calls/${callId}/analyze`, {}, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (res.data.success) {
+        const a = res.data.analysis
+        onAnalyzed({
+          summary: a.summary,
+          sentiment: a.sentiment,
+          outcome: a.outcome,
+          qualityScore: a.qualityScore,
+        })
+        toast.success('Call analyzed successfully')
+      }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Analysis failed')
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
+  const hasAnalysis = !!call.summary
+
+  if (!hasAnalysis) {
+    return (
+      <div className="space-y-4">
+        <div className="text-center py-8 border rounded-lg border-dashed">
+          <Bot className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
+          <h3 className="text-lg font-semibold mb-2">No Analysis Yet</h3>
+          <p className="text-sm text-muted-foreground mb-4">
+            {call.transcript
+              ? 'Run AI analysis to get a summary, sentiment, quality score, and extracted data.'
+              : 'This call has no transcript. A transcript is required for AI analysis.'}
+          </p>
+          {call.transcript && (
+            <Button onClick={handleAnalyze} disabled={analyzing}>
+              {analyzing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Bot className="mr-2 h-4 w-4" />}
+              {analyzing ? 'Analyzing...' : 'Analyze Call'}
+            </Button>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold">AI Analysis</h3>
+        <Button variant="outline" size="sm" onClick={handleAnalyze} disabled={analyzing}>
+          {analyzing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+          Re-analyze
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        <div className="p-3 border rounded-lg text-center">
+          <p className="text-xs text-muted-foreground mb-1">Sentiment</p>
+          <Badge variant={
+            call.sentiment === 'positive' ? 'default' :
+            call.sentiment === 'negative' ? 'destructive' :
+            'secondary'
+          } className={call.sentiment === 'positive' ? 'bg-green-500/10 text-green-600 border-green-500/20' : ''}>
+            {call.sentiment || 'N/A'}
+          </Badge>
+        </div>
+        <div className="p-3 border rounded-lg text-center">
+          <p className="text-xs text-muted-foreground mb-1">Quality Score</p>
+          <p className="text-2xl font-bold">{call.qualityScore || '-'}<span className="text-sm font-normal text-muted-foreground">/10</span></p>
+        </div>
+        <div className="p-3 border rounded-lg text-center">
+          <p className="text-xs text-muted-foreground mb-1">Outcome</p>
+          <Badge variant="outline" className="text-xs">{call.outcome || 'N/A'}</Badge>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <p className="text-sm font-medium">Summary</p>
+        <div className="p-4 bg-muted rounded-lg">
+          <p className="text-sm">{call.summary}</p>
+        </div>
+      </div>
+
+      {call.metadata && typeof call.metadata === 'object' && (call.metadata as any).extractedData && Object.keys((call.metadata as any).extractedData).length > 0 && (
+        <div className="space-y-2">
+          <p className="text-sm font-medium">Extracted Data</p>
+          <div className="p-4 bg-muted rounded-lg">
+            <dl className="grid grid-cols-2 gap-2 text-sm">
+              {Object.entries((call.metadata as any).extractedData).map(([key, value]) => (
+                <div key={key}>
+                  <dt className="text-muted-foreground capitalize">{key.replace(/_/g, ' ')}</dt>
+                  <dd className="font-medium">{String(value)}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
         </div>
       )}
     </div>

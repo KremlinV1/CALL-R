@@ -40,6 +40,8 @@ import {
   HelpCircle,
   RefreshCw,
   Menu,
+  CalendarDays,
+  GitBranch,
 } from "lucide-react"
 import { useAuthStore } from "@/stores/auth-store"
 import { toast } from "sonner"
@@ -50,6 +52,7 @@ const navSections = [
     items: [
       { title: "Agents", href: "/agents", icon: Bot },
       { title: "IVR Menus", href: "/ivr", icon: Menu },
+      { title: "Workflows", href: "/workflows", icon: GitBranch },
     ],
   },
   {
@@ -72,6 +75,7 @@ const navSections = [
     label: "SYSTEM",
     items: [
       { title: "Contacts", href: "/contacts", icon: Users },
+      { title: "Appointments", href: "/appointments", icon: CalendarDays },
       { title: "Settings", href: "/settings", icon: Settings },
     ],
   },

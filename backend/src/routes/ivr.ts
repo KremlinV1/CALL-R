@@ -4,8 +4,163 @@ import { db } from '../db/index.js';
 import { ivrMenus, ivrMenuOptions, ivrCallLogs } from '../db/schema.js';
 import { eq, and, desc, asc } from 'drizzle-orm';
 import { ivrService } from '../services/ivr.js';
+import { ivrTemplates, getTemplateById } from '../data/ivr-templates.js';
 
 const router = Router();
+
+// ============================================
+// IVR Templates
+// ============================================
+
+// GET /api/ivr/templates - List available IVR templates
+router.get('/templates', async (req: AuthRequest, res: Response) => {
+  try {
+    const templates = ivrTemplates.map((t) => ({
+      id: t.id,
+      name: t.name,
+      description: t.description,
+      category: t.category,
+    }));
+    res.json({ templates });
+  } catch (error) {
+    console.error('Error fetching IVR templates:', error);
+    res.status(500).json({ error: 'Failed to fetch templates' });
+  }
+});
+
+// GET /api/ivr/templates/:id - Get full template details
+router.get('/templates/:id', async (req: AuthRequest, res: Response) => {
+  try {
+    const template = getTemplateById(req.params.id);
+    if (!template) {
+      return res.status(404).json({ error: 'Template not found' });
+    }
+    res.json({ template });
+  } catch (error) {
+    console.error('Error fetching IVR template:', error);
+    res.status(500).json({ error: 'Failed to fetch template' });
+  }
+});
+
+// POST /api/ivr/templates/:id/apply - Create menus from template
+router.post('/templates/:id/apply', async (req: AuthRequest, res: Response) => {
+  try {
+    const organizationId = (req as any).user?.organizationId;
+    if (!organizationId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const template = getTemplateById(req.params.id);
+    if (!template) {
+      return res.status(404).json({ error: 'Template not found' });
+    }
+
+    const createdMenus: any[] = [];
+    const menuIdMap = new Map<number, string>(); // Map submenu index to created menu ID
+
+    // First, create all submenus so we have their IDs
+    if (template.mainMenu.submenus) {
+      for (let i = 0; i < template.mainMenu.submenus.length; i++) {
+        const submenu = template.mainMenu.submenus[i];
+        const [created] = await db
+          .insert(ivrMenus)
+          .values({
+            organizationId,
+            name: submenu.name,
+            description: submenu.description,
+            isDefault: false,
+            greetingType: 'tts',
+            greetingText: submenu.greetingText,
+            inputTimeoutSeconds: submenu.inputTimeoutSeconds,
+            maxRetries: submenu.maxRetries,
+            invalidInputMessage: submenu.invalidInputMessage,
+            timeoutMessage: submenu.timeoutMessage,
+          })
+          .returning();
+
+        menuIdMap.set(i, created.id);
+        createdMenus.push(created);
+      }
+    }
+
+    // Create main menu
+    const [mainMenu] = await db
+      .insert(ivrMenus)
+      .values({
+        organizationId,
+        name: template.mainMenu.name,
+        description: template.mainMenu.description,
+        isDefault: true, // Main menu is default
+        greetingType: 'tts',
+        greetingText: template.mainMenu.greetingText,
+        inputTimeoutSeconds: template.mainMenu.inputTimeoutSeconds,
+        maxRetries: template.mainMenu.maxRetries,
+        invalidInputMessage: template.mainMenu.invalidInputMessage,
+        timeoutMessage: template.mainMenu.timeoutMessage,
+      })
+      .returning();
+
+    createdMenus.unshift(mainMenu);
+
+    // Create options for main menu
+    for (const opt of template.mainMenu.options) {
+      const actionData = { ...opt.actionData };
+      
+      // Resolve submenu references
+      if (opt.actionType === 'submenu' && typeof opt.actionData.submenuIndex === 'number') {
+        const submenuId = menuIdMap.get(opt.actionData.submenuIndex);
+        if (submenuId) {
+          actionData.menuId = submenuId;
+          delete actionData.submenuIndex;
+        }
+      }
+
+      await db.insert(ivrMenuOptions).values({
+        menuId: mainMenu.id,
+        dtmfKey: opt.dtmfKey,
+        label: opt.label,
+        actionType: opt.actionType,
+        actionData,
+        announcementText: opt.announcementText,
+      });
+    }
+
+    // Create options for submenus
+    if (template.mainMenu.submenus) {
+      for (let i = 0; i < template.mainMenu.submenus.length; i++) {
+        const submenu = template.mainMenu.submenus[i];
+        const submenuId = menuIdMap.get(i);
+        if (!submenuId) continue;
+
+        for (const opt of submenu.options) {
+          const actionData = { ...opt.actionData };
+
+          // Handle return to main menu
+          if (opt.actionData.returnToMain) {
+            actionData.menuId = mainMenu.id;
+            delete actionData.returnToMain;
+          }
+
+          await db.insert(ivrMenuOptions).values({
+            menuId: submenuId,
+            dtmfKey: opt.dtmfKey,
+            label: opt.label,
+            actionType: opt.actionType,
+            actionData,
+            announcementText: opt.announcementText,
+          });
+        }
+      }
+    }
+
+    res.status(201).json({
+      success: true,
+      message: `Created ${createdMenus.length} IVR menus from template "${template.name}"`,
+      menus: createdMenus,
+    });
+  } catch (error) {
+    console.error('Error applying IVR template:', error);
+    res.status(500).json({ error: 'Failed to apply template' });
+  }
+});
 
 // ============================================
 // IVR Menus CRUD

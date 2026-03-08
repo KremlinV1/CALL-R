@@ -137,6 +137,7 @@ router.post('/', async (req: AuthRequest, res: Response) => {
       transferEnabled: data.actions?.transferCall ?? false,
       transferDestinations: data.transferConfig?.destinations || [],
       voicemailEnabled: data.actions?.leaveVoicemail ?? false,
+      voicemailAction: data.voicemailConfig?.leaveMessage ? 'leave_message' : 'hangup',
       voicemailMessage: data.voicemailConfig?.message || '',
     }).returning();
     
@@ -200,6 +201,7 @@ router.put('/:id', async (req: AuthRequest, res: Response) => {
         transferEnabled: data.actions?.transferCall ?? false,
         transferDestinations: data.transferConfig?.destinations || [],
         voicemailEnabled: data.actions?.leaveVoicemail ?? false,
+        voicemailAction: data.voicemailConfig?.leaveMessage ? 'leave_message' : 'hangup',
         voicemailMessage: data.voicemailConfig?.message || '',
         updatedAt: new Date(),
       })

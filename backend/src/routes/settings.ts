@@ -348,7 +348,7 @@ async function updateAgentEnvFile(provider: Provider, apiKey: string): Promise<v
 // TELEPHONY PROVIDER ROUTES
 // ============================================
 
-const TELEPHONY_PROVIDERS = ['livekit_sip'] as const;
+const TELEPHONY_PROVIDERS = ['livekit_sip', 'telnyx'] as const;
 type TelephonyProvider = typeof TELEPHONY_PROVIDERS[number];
 
 interface TelephonyConfigRequest {
@@ -358,6 +358,10 @@ interface TelephonyConfigRequest {
   apiKey?: string;
   sipUri?: string;
   spaceUrl?: string; // SignalWire space name (e.g., "myspace" for myspace.signalwire.com)
+  // Telnyx specific
+  telnyxConnectionId?: string;
+  telnyxSipUsername?: string;
+  telnyxSipPassword?: string;
 }
 
 // GET /api/settings/telephony - Get telephony configuration
@@ -376,6 +380,8 @@ router.get('/telephony', async (req: Request, res: Response) => {
         authTokenPrefix: telephonyConfig.authTokenPrefix,
         livekitSipUri: telephonyConfig.livekitSipUri,
         signalwireSpaceUrl: telephonyConfig.signalwireSpaceUrl,
+        telnyxConnectionId: telephonyConfig.telnyxConnectionId,
+        telnyxSipUsername: telephonyConfig.telnyxSipUsername,
         isConfigured: telephonyConfig.isConfigured,
         lastVerifiedAt: telephonyConfig.lastVerifiedAt,
         updatedAt: telephonyConfig.updatedAt,
@@ -400,6 +406,8 @@ router.get('/telephony', async (req: Request, res: Response) => {
       authTokenPrefix: config[0].authTokenPrefix,
       livekitSipUri: config[0].livekitSipUri,
       signalwireSpaceUrl: config[0].signalwireSpaceUrl,
+      telnyxConnectionId: config[0].telnyxConnectionId,
+      telnyxSipUsername: config[0].telnyxSipUsername,
       lastVerifiedAt: config[0].lastVerifiedAt,
       updatedAt: config[0].updatedAt,
     });
@@ -413,7 +421,7 @@ router.get('/telephony', async (req: Request, res: Response) => {
 router.post('/telephony', async (req: Request, res: Response) => {
   try {
     const organizationId = (req as any).user?.organizationId;
-    const { provider, accountSid, authToken, apiKey, sipUri, spaceUrl } = req.body as TelephonyConfigRequest;
+    const { provider, accountSid, authToken, apiKey, sipUri, spaceUrl, telnyxConnectionId, telnyxSipUsername, telnyxSipPassword } = req.body as TelephonyConfigRequest;
 
     if (!organizationId) {
       return res.status(401).json({ error: 'Unauthorized' });
@@ -429,11 +437,18 @@ router.post('/telephony', async (req: Request, res: Response) => {
         return res.status(400).json({ error: 'SIP URI is required for LiveKit SIP' });
       }
     }
+    
+    if (provider === 'telnyx') {
+      if (!apiKey) {
+        return res.status(400).json({ error: 'API Key is required for Telnyx' });
+      }
+    }
 
     // Encrypt credentials
     const encryptedAccountSid = accountSid ? encryptApiKey(accountSid) : null;
     const encryptedAuthToken = authToken ? encryptApiKey(authToken) : null;
     const encryptedApiKeyValue = apiKey ? encryptApiKey(apiKey) : null;
+    const encryptedTelnyxSipPwd = telnyxSipPassword ? encryptApiKey(telnyxSipPassword) : null;
 
     // Get masked prefixes
     const accountSidPrefix = accountSid ? getMaskedKeyPrefix(accountSid) : null;
@@ -459,6 +474,9 @@ router.post('/telephony', async (req: Request, res: Response) => {
           authTokenPrefix,
           livekitSipUri: sipUri || null,
           signalwireSpaceUrl: spaceUrl || null,
+          telnyxConnectionId: telnyxConnectionId || null,
+          telnyxSipUsername: telnyxSipUsername || null,
+          encryptedTelnyxSipPassword: encryptedTelnyxSipPwd,
           isConfigured: true,
           updatedAt: new Date(),
         })
@@ -475,12 +493,15 @@ router.post('/telephony', async (req: Request, res: Response) => {
         authTokenPrefix,
         livekitSipUri: sipUri || null,
         signalwireSpaceUrl: spaceUrl || null,
+        telnyxConnectionId: telnyxConnectionId || null,
+        telnyxSipUsername: telnyxSipUsername || null,
+        encryptedTelnyxSipPassword: encryptedTelnyxSipPwd,
         isConfigured: true,
       });
     }
 
     // Update backend .env file with telephony credentials
-    await updateTelephonyEnvFile(provider, { accountSid, authToken, apiKey, spaceUrl });
+    await updateTelephonyEnvFile(provider, { accountSid, authToken, apiKey, spaceUrl, telnyxConnectionId, telnyxSipUsername, telnyxSipPassword });
 
     res.json({
       success: true,
@@ -488,6 +509,8 @@ router.post('/telephony', async (req: Request, res: Response) => {
       provider,
       accountSidPrefix,
       authTokenPrefix,
+      telnyxConnectionId,
+      telnyxSipUsername,
     });
   } catch (error) {
     console.error('Error configuring telephony:', error);
@@ -560,7 +583,7 @@ async function verifyTelephonyCredentials(
 // Helper function to update backend .env file with telephony credentials
 async function updateTelephonyEnvFile(
   provider: TelephonyProvider,
-  credentials: { accountSid?: string; authToken?: string; apiKey?: string; spaceUrl?: string }
+  credentials: { accountSid?: string; authToken?: string; apiKey?: string; spaceUrl?: string; telnyxConnectionId?: string; telnyxSipUsername?: string; telnyxSipPassword?: string }
 ): Promise<void> {
   const fs = await import('fs');
   const path = await import('path');
@@ -581,6 +604,12 @@ async function updateTelephonyEnvFile(
     switch (provider) {
       case 'livekit_sip':
         // LiveKit SIP credentials are set via LIVEKIT_* env vars; no additional updates needed here
+        break;
+      case 'telnyx':
+        if (credentials.apiKey) updates['TELNYX_API_KEY'] = credentials.apiKey;
+        if (credentials.telnyxConnectionId) updates['TELNYX_CONNECTION_ID'] = credentials.telnyxConnectionId;
+        if (credentials.telnyxSipUsername) updates['TELNYX_SIP_USERNAME'] = credentials.telnyxSipUsername;
+        if (credentials.telnyxSipPassword) updates['TELNYX_SIP_PASSWORD'] = credentials.telnyxSipPassword;
         break;
     }
 

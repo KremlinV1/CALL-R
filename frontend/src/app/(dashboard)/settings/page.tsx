@@ -42,6 +42,7 @@ import {
   Loader2,
   CheckCircle,
   XCircle,
+  Plug,
 } from "lucide-react"
 import { useState, useEffect, useMemo } from "react"
 import { useAuthStore } from "@/stores/auth-store"
@@ -241,10 +242,12 @@ export default function SettingsPage() {
       </div>
 
       <Tabs defaultValue="profile" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:inline-flex">
+        <TabsList className="grid w-full grid-cols-8 lg:w-auto lg:inline-flex">
           <TabsTrigger value="profile">Profile</TabsTrigger>
           <TabsTrigger value="organization">Organization</TabsTrigger>
           <TabsTrigger value="telephony">Telephony</TabsTrigger>
+          <TabsTrigger value="crm">CRM</TabsTrigger>
+          <TabsTrigger value="notifications">Notifications</TabsTrigger>
           <TabsTrigger value="api">API Keys</TabsTrigger>
           <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
           <TabsTrigger value="billing">Billing</TabsTrigger>
@@ -373,7 +376,48 @@ export default function SettingsPage() {
 
         {/* Telephony Settings */}
         <TelephonySettings token={token} isHydrated={isHydrated} />
-        
+
+        {/* CRM Integrations */}
+        <TabsContent value="crm" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>CRM Integrations</CardTitle>
+              <CardDescription>Connect Salesforce, HubSpot, or Pipedrive to sync contacts and log calls</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Manage your CRM connections, field mappings, and sync settings from the dedicated CRM page.
+              </p>
+              <a href="/settings/crm">
+                <Button>
+                  <Plug className="mr-2 h-4 w-4" />
+                  Manage CRM Integrations
+                </Button>
+              </a>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Notifications */}
+        <TabsContent value="notifications" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Notification Channels</CardTitle>
+              <CardDescription>Set up Slack, email, SMS, Teams, Discord, or webhook notifications for real-time alerts</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Configure notification channels, event subscriptions, and delivery settings from the dedicated page.
+              </p>
+              <a href="/settings/notifications">
+                <Button>
+                  <Bell className="mr-2 h-4 w-4" />
+                  Manage Notifications
+                </Button>
+              </a>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* API Keys */}
         <TabsContent value="api" className="space-y-6">
@@ -1104,7 +1148,7 @@ function ProviderPhoneImport({ token, isHydrated, provider }: { token: string | 
       const response = await axios.get(`${API_URL}/agents`, {
         headers: { Authorization: `Bearer ${token}` }
       })
-      return response.data as Agent[]
+      return (response.data.agents || response.data) as Agent[]
     },
     enabled: isHydrated && !!token,
   })
@@ -1114,7 +1158,7 @@ function ProviderPhoneImport({ token, isHydrated, provider }: { token: string | 
     mutationFn: async (numbers: ProviderPhoneNumber[]) => {
       const response = await axios.post(
         `${API_URL}/settings/telephony/import-numbers`,
-        { numbers, agentId: selectedAgent || null },
+        { numbers, agentId: selectedAgent && selectedAgent !== 'none' ? selectedAgent : null },
         { headers: { Authorization: `Bearer ${token}` } }
       )
       return response.data
@@ -1224,7 +1268,7 @@ function ProviderPhoneImport({ token, isHydrated, provider }: { token: string | 
                     <SelectValue placeholder="Select agent (optional)" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">No agent</SelectItem>
+                    <SelectItem value="none">No agent</SelectItem>
                     {agents?.map((agent) => (
                       <SelectItem key={agent.id} value={agent.id}>
                         {agent.name}
@@ -1274,7 +1318,7 @@ function ProviderPhoneImport({ token, isHydrated, provider }: { token: string | 
             <div className="flex items-center justify-between pt-2 border-t">
               <p className="text-sm text-muted-foreground">
                 {selectedNumbers.length} number(s) selected
-                {selectedAgent && agents && (
+                {selectedAgent && selectedAgent !== 'none' && agents && (
                   <span> → will be assigned to <strong>{agents.find(a => a.id === selectedAgent)?.name}</strong></span>
                 )}
               </p>

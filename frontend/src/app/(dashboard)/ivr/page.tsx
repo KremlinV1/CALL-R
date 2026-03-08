@@ -112,12 +112,21 @@ function useToken() {
   return token || storeToken
 }
 
+interface IvrTemplate {
+  id: string
+  name: string
+  description: string
+  category: string
+}
+
 export default function IvrPage() {
   const token = useToken()
   const queryClient = useQueryClient()
   const [searchQuery, setSearchQuery] = useState("")
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [editingMenu, setEditingMenu] = useState<IvrMenu | null>(null)
+  const [isTemplateOpen, setIsTemplateOpen] = useState(false)
+  const [applyingTemplate, setApplyingTemplate] = useState<string | null>(null)
 
   // Fetch IVR menus
   const { data, isLoading, error } = useQuery({
@@ -141,6 +150,40 @@ export default function IvrPage() {
       return res.data
     },
     enabled: !!token,
+  })
+
+  // Fetch IVR templates
+  const { data: templatesData } = useQuery({
+    queryKey: ["ivr-templates"],
+    queryFn: async () => {
+      const res = await axios.get(`${API_URL}/ivr/templates`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      return res.data
+    },
+    enabled: !!token,
+  })
+
+  const templates: IvrTemplate[] = templatesData?.templates || []
+
+  // Apply template mutation
+  const applyTemplateMutation = useMutation({
+    mutationFn: async (templateId: string) => {
+      const res = await axios.post(`${API_URL}/ivr/templates/${templateId}/apply`, {}, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      return res.data
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["ivr-menus"] })
+      toast.success(data.message || "Template applied successfully")
+      setIsTemplateOpen(false)
+      setApplyingTemplate(null)
+    },
+    onError: () => {
+      toast.error("Failed to apply template")
+      setApplyingTemplate(null)
+    },
   })
 
   const menus: IvrMenu[] = data?.menus || []
@@ -197,10 +240,16 @@ export default function IvrPage() {
             Create interactive voice response menus for inbound calls
           </p>
         </div>
-        <Button onClick={() => { setEditingMenu(null); setIsCreateOpen(true) }}>
-          <Plus className="mr-2 h-4 w-4" />
-          Create Menu
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setIsTemplateOpen(true)}>
+            <Settings className="mr-2 h-4 w-4" />
+            Use Template
+          </Button>
+          <Button onClick={() => { setEditingMenu(null); setIsCreateOpen(true) }}>
+            <Plus className="mr-2 h-4 w-4" />
+            Create Menu
+          </Button>
+        </div>
       </div>
 
       {/* Search */}
@@ -335,6 +384,58 @@ export default function IvrPage() {
         agents={agents}
         token={token}
       />
+
+      {/* Template Selection Dialog */}
+      <Dialog open={isTemplateOpen} onOpenChange={setIsTemplateOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Choose an IVR Template</DialogTitle>
+            <DialogDescription>
+              Start with a pre-built IVR flow. Templates include main menus and submenus with common options.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            {templates.map((template) => (
+              <Card
+                key={template.id}
+                className="cursor-pointer hover:border-primary transition-colors"
+                onClick={() => {
+                  if (!applyingTemplate) {
+                    setApplyingTemplate(template.id)
+                    applyTemplateMutation.mutate(template.id)
+                  }
+                }}
+              >
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-lg">{template.name}</CardTitle>
+                    <Badge variant="outline">{template.category}</Badge>
+                  </div>
+                  <CardDescription>{template.description}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {applyingTemplate === template.id ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Creating menus from template...
+                    </div>
+                  ) : (
+                    <Button variant="outline" size="sm" className="w-full">
+                      <Plus className="mr-2 h-4 w-4" />
+                      Use This Template
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+            {templates.length === 0 && (
+              <div className="text-center py-8 text-muted-foreground">
+                No templates available
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
