@@ -102,12 +102,12 @@ export default function PhonePoolsPage() {
     enabled: !authLoading && !!token && isAuthenticated,
   });
 
-  // Fetch available phone numbers
+  // Fetch available phone numbers from DB pool
   const { data: phoneNumbersData } = useQuery({
     queryKey: ['phone-numbers'],
     queryFn: async () => {
       if (!token) throw new Error('No token');
-      const response = await axios.get(`${API_URL}/settings/phone-numbers`, {
+      const response = await axios.get(`${API_URL}/phone-numbers/db`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       return response.data;
@@ -592,16 +592,16 @@ export default function PhonePoolsPage() {
           </DialogHeader>
 
           <div className="space-y-4">
-            {phoneNumbersData?.phoneNumbers?.length === 0 ? (
+            {phoneNumbersData?.numbers?.length === 0 ? (
               <div className="text-center py-8">
                 <AlertCircle className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
                 <p className="text-sm text-muted-foreground">
-                  No phone numbers available. Add some in Settings first.
+                  No phone numbers available. Add some from the Phone Numbers page first.
                 </p>
               </div>
             ) : (
               <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                {phoneNumbersData?.phoneNumbers?.map((num: any) => (
+                {phoneNumbersData?.numbers?.map((num: any) => (
                   <label
                     key={num.id}
                     className="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-accent"

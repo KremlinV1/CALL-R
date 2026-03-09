@@ -8,6 +8,7 @@ import { OutcomeDecisionEngine } from '../services/outcomeDecisionEngine.js';
 import { createTelnyxService } from '../services/telnyx.js';
 import { analyzeCall, analyzeUnprocessedCalls } from '../services/callAnalysis.js';
 import { resolveCallerId } from '../services/callerId.js';
+import { phoneNumberRotation } from '../services/phoneNumberRotation.js';
 // LiveKit + Telnyx outbound providers
 
 const router = Router();
@@ -295,7 +296,7 @@ router.get('/:id/recording', async (req: AuthRequest, res: Response) => {
 // Initiate outbound call — supports LiveKit and Telnyx providers
 router.post('/outbound', async (req: AuthRequest, res: Response) => {
   try {
-    const { agentId, toNumber, contactId, fromNumberId, fromNumber: directFromNumber, provider: requestedProvider, callerIdProfileId } = req.body;
+    const { agentId, toNumber, contactId, fromNumberId, fromNumber: directFromNumber, provider: requestedProvider, callerIdProfileId, poolId } = req.body;
     const organizationId = req.user?.organizationId;
     
     if (!organizationId) {
@@ -343,7 +344,7 @@ router.post('/outbound', async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'Telnyx not configured. Set TELNYX_API_KEY and TELNYX_CONNECTION_ID.' });
     }
     
-    // Get from number — accept direct number or look up by ID
+    // Get from number — accept direct number, look up by ID, or rotate from pool
     let fromNumber = directFromNumber || '';
     if (!fromNumber && fromNumberId) {
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(fromNumberId);
@@ -357,6 +358,17 @@ router.post('/outbound', async (req: AuthRequest, res: Response) => {
         .limit(1);
       if (numberResult.length > 0) {
         fromNumber = numberResult[0].number;
+      }
+    }
+    
+    // Pool rotation: if poolId provided and no explicit number, get next from pool
+    if (!fromNumber && poolId) {
+      const poolNumber = await phoneNumberRotation.getNextNumber(poolId);
+      if (poolNumber) {
+        fromNumber = poolNumber.phoneNumber;
+        console.log(`📞 Using rotated number from pool: ${fromNumber}`);
+      } else {
+        console.warn(`⚠️ No available numbers in pool ${poolId}, falling back to default`);
       }
     }
     
