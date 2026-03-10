@@ -42,6 +42,9 @@ import {
   Menu,
   CalendarDays,
   GitBranch,
+  Radio,
+  ShieldAlert,
+  MessageSquare,
 } from "lucide-react"
 import { useAuthStore } from "@/stores/auth-store"
 import { toast } from "sonner"
@@ -66,9 +69,17 @@ const navSections = [
   {
     label: "MONITOR",
     items: [
-      { title: "Dashboard", href: "/", icon: LayoutDashboard },
+      { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+      { title: "Live Monitor", href: "/monitor", icon: Radio },
       { title: "Call History", href: "/calls", icon: Phone },
       { title: "Analytics", href: "/analytics", icon: BarChart3 },
+    ],
+  },
+  {
+    label: "COMMUNICATE",
+    items: [
+      { title: "Messages", href: "/messages", icon: MessageSquare },
+      { title: "DNC List", href: "/dnc", icon: ShieldAlert },
     ],
   },
   {
@@ -76,6 +87,7 @@ const navSections = [
     items: [
       { title: "Contacts", href: "/contacts", icon: Users },
       { title: "Appointments", href: "/appointments", icon: CalendarDays },
+      { title: "Subscription", href: "/subscription", icon: CreditCard },
       { title: "Settings", href: "/settings", icon: Settings },
     ],
   },

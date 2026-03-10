@@ -22,7 +22,7 @@ export default function DashboardLayout({
     // Check if there's a token in localStorage on mount
     const storedToken = localStorage.getItem("token")
     if (!storedToken) {
-      router.replace("/login")
+      router.replace("/")
     } else {
       setHasToken(true)
     }

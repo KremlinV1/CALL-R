@@ -42,6 +42,10 @@ import crmRoutes from './routes/crm.js';
 import workflowRoutes from './routes/workflows.js';
 import notificationRoutes from './routes/notifications.js';
 import callerIdRoutes from './routes/callerId.js';
+import dncRoutes from './routes/dnc.js';
+import messagesRoutes from './routes/messages.js';
+import ringGroupRoutes from './routes/ringGroups.js';
+import subscriptionRoutes from './routes/subscription.js';
 import { campaignExecutor } from './services/campaignExecutor.js';
 
 // Import middleware
@@ -110,6 +114,10 @@ app.use('/api/crm', authMiddleware, crmRoutes);
 app.use('/api/workflows', authMiddleware, workflowRoutes);
 app.use('/api/notifications', authMiddleware, notificationRoutes);
 app.use('/api/caller-id', authMiddleware, callerIdRoutes);
+app.use('/api/dnc', authMiddleware, dncRoutes);
+app.use('/api/messages', authMiddleware, messagesRoutes);
+app.use('/api/ring-groups', authMiddleware, ringGroupRoutes);
+app.use('/api/subscription', authMiddleware, subscriptionRoutes);
 
 // Socket.IO connection handling
 io.on('connection', async (socket) => {
@@ -149,6 +157,8 @@ io.on('connection', async (socket) => {
 
 // Make io accessible to routes
 app.set('io', io);
+// Also expose globally for webhook routes that don't have req.app
+(globalThis as any).__socketIO = io;
 
 // Error handling middleware
 app.use(errorHandler);

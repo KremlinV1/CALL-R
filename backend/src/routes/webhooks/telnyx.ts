@@ -1,11 +1,18 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../../db/index.js';
-import { calls, agents, campaigns, campaignContacts } from '../../db/schema.js';
-import { eq, sql } from 'drizzle-orm';
+import { calls, agents, campaigns, campaignContacts, messages, contacts, phoneNumbers } from '../../db/schema.js';
+import { eq, and, sql } from 'drizzle-orm';
 import { TelnyxService } from '../../services/telnyx.js';
 import { analyzeCall } from '../../services/callAnalysis.js';
+import { usageService } from '../../services/usageService.js';
 
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY || '';
+
+// Import io getter for real-time events
+function getIO(req?: Request) {
+  // Webhook routes don't have req.app, so use the global import
+  return (globalThis as any).__socketIO;
+}
 
 const router = Router();
 
@@ -110,6 +117,11 @@ router.post('/', async (req: Request, res: Response) => {
               externalId: payload.call_control_id,
             })
             .where(eq(calls.id, call.id));
+          
+          const io1 = getIO();
+          io1?.to(call.organizationId).emit('call:status', {
+            callId: call.id, status: 'ringing', fromNumber: payload.from, toNumber: payload.to,
+          });
         }
         break;
 
@@ -134,6 +146,11 @@ router.post('/', async (req: Request, res: Response) => {
               })
               .where(eq(campaignContacts.id, clientState.campaignContactId));
           }
+          
+          const io2 = getIO();
+          io2?.to(call.organizationId).emit('call:status', {
+            callId: call.id, status: 'in_progress', answeredAt: new Date().toISOString(),
+          });
         }
 
         // Handle warm transfer: target answered — bridge the calls
@@ -209,6 +226,20 @@ router.post('/', async (req: Request, res: Response) => {
               durationSeconds: duration,
             })
             .where(eq(calls.id, call.id));
+
+          const io3 = getIO();
+          io3?.to(call.organizationId).emit('call:status', {
+            callId: call.id, status: finalStatus, endedAt: endTime.toISOString(), durationSeconds: duration,
+          });
+
+          // ─── Record usage minutes ────────────────────────────────
+          if (duration > 0) {
+            usageService.recordUsage(call.organizationId, call.id, duration, {
+              campaignId: call.campaignId || undefined,
+              description: `${call.direction} call to ${payload.to || 'unknown'}`,
+            }).catch(err => console.error(`[Webhook] Usage recording failed for call ${call.id}:`, err.message));
+          }
+          // ─── End usage recording ─────────────────────────────────
 
           // Update campaign contact if applicable
           if (clientState.campaignContactId) {
@@ -419,6 +450,91 @@ router.post('/', async (req: Request, res: Response) => {
     console.error('[Telnyx Webhook] Error processing webhook:', error);
     // Still return 200 to prevent retries for processing errors
     res.status(200).json({ received: true, error: 'Processing error' });
+  }
+});
+
+// ─── SMS / Messaging Webhook ──────────────────────────────────────
+router.post('/messaging', async (req: Request, res: Response) => {
+  try {
+    const { data } = req.body;
+    if (!data) return res.status(200).json({ received: true });
+
+    const eventType = data.event_type;
+    const payload = data.payload;
+
+    console.log(`[Telnyx SMS] Event: ${eventType}`);
+
+    if (eventType === 'message.received') {
+      const fromNumber = payload.from?.phone_number || '';
+      const toNumber = payload.to?.[0]?.phone_number || '';
+      const body = payload.text || '';
+      const externalId = payload.id || '';
+      const mediaUrls = (payload.media || []).map((m: any) => m.url);
+
+      // Look up which org owns this number
+      const [ownedNumber] = await db
+        .select({ organizationId: phoneNumbers.organizationId })
+        .from(phoneNumbers)
+        .where(eq(phoneNumbers.number, toNumber))
+        .limit(1);
+
+      if (!ownedNumber) {
+        console.log(`[Telnyx SMS] No org found for number ${toNumber}`);
+        return res.status(200).json({ received: true });
+      }
+
+      const organizationId = ownedNumber.organizationId;
+
+      // Try to match sender to a contact
+      const [contact] = await db
+        .select({ id: contacts.id })
+        .from(contacts)
+        .where(and(eq(contacts.organizationId, organizationId), eq(contacts.phone, fromNumber)))
+        .limit(1);
+
+      // Store the inbound message
+      await db.insert(messages).values({
+        organizationId,
+        contactId: contact?.id || null,
+        direction: 'inbound',
+        status: 'received',
+        fromNumber,
+        toNumber,
+        body,
+        provider: 'telnyx',
+        externalId,
+        mediaUrls: mediaUrls.length > 0 ? mediaUrls : [],
+      });
+
+      // Emit socket event
+      const io = getIO();
+      io?.to(organizationId).emit('message:received', { fromNumber, toNumber, body });
+
+      console.log(`[Telnyx SMS] Inbound message stored from ${fromNumber}`);
+    } else if (eventType === 'message.sent' || eventType === 'message.delivered' || eventType === 'message.failed') {
+      // Update outbound message status
+      const externalId = payload.id;
+      const newStatus = eventType === 'message.delivered' ? 'delivered'
+        : eventType === 'message.failed' ? 'failed' : 'sent';
+
+      if (externalId) {
+        const updateData: any = { status: newStatus };
+        if (newStatus === 'delivered') updateData.deliveredAt = new Date();
+        if (newStatus === 'failed') {
+          updateData.errorCode = payload.errors?.[0]?.code;
+          updateData.errorMessage = payload.errors?.[0]?.title;
+        }
+
+        await db.update(messages)
+          .set(updateData)
+          .where(eq(messages.externalId, externalId));
+      }
+    }
+
+    res.status(200).json({ received: true });
+  } catch (error) {
+    console.error('[Telnyx SMS Webhook] Error:', error);
+    res.status(200).json({ received: true });
   }
 });
 

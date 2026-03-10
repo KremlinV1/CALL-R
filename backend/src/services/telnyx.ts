@@ -328,6 +328,27 @@ export class TelnyxService {
   }
 
   /**
+   * Send an SMS message
+   */
+  async sendSMS(from: string, to: string, body: string, options?: { mediaUrls?: string[]; webhookUrl?: string }): Promise<any> {
+    const payload: Record<string, any> = {
+      from,
+      to,
+      text: body,
+      type: 'SMS',
+    };
+    if (options?.mediaUrls?.length) {
+      payload.media_urls = options.mediaUrls;
+      payload.type = 'MMS';
+    }
+    if (options?.webhookUrl) {
+      payload.webhook_url = options.webhookUrl;
+    }
+    const response = await this.client.post('/messages', payload);
+    return response.data?.data || response.data;
+  }
+
+  /**
    * Verify webhook signature
    */
   static verifyWebhookSignature(

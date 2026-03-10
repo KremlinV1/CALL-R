@@ -9,6 +9,7 @@ import { createTelnyxService } from '../services/telnyx.js';
 import { analyzeCall, analyzeUnprocessedCalls } from '../services/callAnalysis.js';
 import { resolveCallerId } from '../services/callerId.js';
 import { phoneNumberRotation } from '../services/phoneNumberRotation.js';
+import { usageService } from '../services/usageService.js';
 // LiveKit + Telnyx outbound providers
 
 const router = Router();
@@ -208,6 +209,90 @@ router.get('/stats/summary', async (req: AuthRequest, res: Response) => {
   }
 });
 
+// ─── Live Call Monitor ─────────────────────────────────────────────
+// Get all active/in-progress calls with agent & campaign info
+router.get('/monitor/active', async (req: AuthRequest, res: Response) => {
+  try {
+    const organizationId = req.user?.organizationId;
+    if (!organizationId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const activeCalls = await db
+      .select({
+        id: calls.id,
+        agentId: calls.agentId,
+        campaignId: calls.campaignId,
+        contactId: calls.contactId,
+        externalId: calls.externalId,
+        direction: calls.direction,
+        status: calls.status,
+        fromNumber: calls.fromNumber,
+        toNumber: calls.toNumber,
+        startedAt: calls.startedAt,
+        answeredAt: calls.answeredAt,
+        durationSeconds: calls.durationSeconds,
+        provider: calls.provider,
+        metadata: calls.metadata,
+        createdAt: calls.createdAt,
+        agentName: agents.name,
+        campaignName: campaigns.name,
+        contactFirstName: contacts.firstName,
+        contactLastName: contacts.lastName,
+        contactCompany: contacts.company,
+      })
+      .from(calls)
+      .leftJoin(agents, eq(calls.agentId, agents.id))
+      .leftJoin(campaigns, eq(calls.campaignId, campaigns.id))
+      .leftJoin(contacts, eq(calls.contactId, contacts.id))
+      .where(
+        and(
+          eq(calls.organizationId, organizationId),
+          inArray(calls.status, ['queued', 'ringing', 'in_progress'])
+        )
+      )
+      .orderBy(desc(calls.createdAt));
+
+    // Also get running campaigns summary
+    const runningCampaigns = await db
+      .select({
+        id: campaigns.id,
+        name: campaigns.name,
+        status: campaigns.status,
+        totalContacts: campaigns.totalContacts,
+        completedCalls: campaigns.completedCalls,
+        connectedCalls: campaigns.connectedCalls,
+        failedCalls: campaigns.failedCalls,
+        voicemailCalls: campaigns.voicemailCalls,
+        callsPerMinute: campaigns.callsPerMinute,
+        maxConcurrentCalls: campaigns.maxConcurrentCalls,
+        startedAt: campaigns.startedAt,
+        agentName: agents.name,
+      })
+      .from(campaigns)
+      .leftJoin(agents, eq(campaigns.agentId, agents.id))
+      .where(
+        and(
+          eq(campaigns.organizationId, organizationId),
+          inArray(campaigns.status, ['running', 'paused'])
+        )
+      );
+
+    // Live stats
+    const now = new Date();
+    const liveStats = {
+      activeCalls: activeCalls.length,
+      queued: activeCalls.filter(c => c.status === 'queued').length,
+      ringing: activeCalls.filter(c => c.status === 'ringing').length,
+      inProgress: activeCalls.filter(c => c.status === 'in_progress').length,
+      runningCampaigns: runningCampaigns.filter(c => c.status === 'running').length,
+    };
+
+    res.json({ calls: activeCalls, campaigns: runningCampaigns, stats: liveStats });
+  } catch (error) {
+    console.error('Error fetching active calls:', error);
+    res.status(500).json({ error: 'Failed to fetch active calls' });
+  }
+});
+
 // Get single call with full details
 router.get('/:id', async (req: AuthRequest, res: Response) => {
   try {
@@ -306,6 +391,18 @@ router.post('/outbound', async (req: AuthRequest, res: Response) => {
     if (!agentId || !toNumber) {
       return res.status(400).json({ error: 'agentId and toNumber are required' });
     }
+
+    // ─── Minutes Check ─────────────────────────────────────────
+    const usageCheck = await usageService.checkMinutes(organizationId);
+    if (!usageCheck.allowed) {
+      return res.status(403).json({
+        error: 'Insufficient minutes',
+        message: usageCheck.reason,
+        remaining: usageCheck.remaining,
+        plan: usageCheck.plan,
+      });
+    }
+    // ─── End Minutes Check ─────────────────────────────────────
     
     // Validate agent exists
     const agentResult = await db

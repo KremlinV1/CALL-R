@@ -733,6 +733,205 @@ export const notificationLogs = pgTable('notification_logs', {
   sentAt: timestamp('sent_at').defaultNow().notNull(),
 });
 
+// ─── Subscriptions & Usage Tracking ───────────────────────────────
+
+export const subscriptionPlanEnum = pgEnum('subscription_plan', ['free', 'pro', 'enterprise']);
+export const subscriptionStatusEnum = pgEnum('subscription_status', ['active', 'cancelled', 'past_due', 'trialing', 'expired']);
+
+export const subscriptions = pgTable('subscriptions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id).notNull(),
+
+  plan: subscriptionPlanEnum('plan').default('free').notNull(),
+  status: subscriptionStatusEnum('status').default('active').notNull(),
+
+  // Minutes allocation
+  monthlyMinutes: integer('monthly_minutes').default(100).notNull(),   // 100=free, 4000=pro, -1=unlimited
+  minutesUsed: integer('minutes_used').default(0).notNull(),           // resets each billing period
+  bonusMinutes: integer('bonus_minutes').default(0).notNull(),         // purchased add-ons, don't reset
+  bonusMinutesUsed: integer('bonus_minutes_used').default(0).notNull(),
+
+  // Feature limits
+  maxAgents: integer('max_agents').default(1).notNull(),               // 1=free, -1=unlimited
+  maxPhoneNumbers: integer('max_phone_numbers').default(1).notNull(),  // 1=free, 10=pro, -1=unlimited
+  maxCampaigns: integer('max_campaigns').default(1).notNull(),         // 1=free, -1=unlimited
+
+  // Feature flags
+  liveMonitorEnabled: boolean('live_monitor_enabled').default(false).notNull(),
+  smsEnabled: boolean('sms_enabled').default(false).notNull(),
+  dncEnabled: boolean('dnc_enabled').default(false).notNull(),
+  analyticsEnabled: boolean('analytics_enabled').default(false).notNull(),
+  prioritySupport: boolean('priority_support').default(false).notNull(),
+
+  // Billing period
+  currentPeriodStart: timestamp('current_period_start').defaultNow().notNull(),
+  currentPeriodEnd: timestamp('current_period_end').notNull(),
+
+  // Payment provider (for future Stripe integration)
+  stripeCustomerId: varchar('stripe_customer_id', { length: 255 }),
+  stripeSubscriptionId: varchar('stripe_subscription_id', { length: 255 }),
+  stripePriceId: varchar('stripe_price_id', { length: 255 }),
+
+  cancelledAt: timestamp('cancelled_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export const usageRecords = pgTable('usage_records', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id).notNull(),
+  subscriptionId: uuid('subscription_id').references(() => subscriptions.id).notNull(),
+
+  // What consumed the minutes
+  callId: uuid('call_id').references(() => calls.id),
+  campaignId: uuid('campaign_id').references(() => campaigns.id),
+
+  // Usage details
+  minutesUsed: integer('minutes_used').default(0).notNull(),     // rounded up to nearest minute
+  secondsUsed: integer('seconds_used').default(0).notNull(),     // exact seconds for auditing
+  source: varchar('source', { length: 50 }).default('call').notNull(), // call, sms, api
+  description: varchar('description', { length: 500 }),
+
+  // Which pool the minutes were deducted from
+  fromBonus: boolean('from_bonus').default(false).notNull(),
+
+  recordedAt: timestamp('recorded_at').defaultNow().notNull(),
+});
+
+// ─── Do Not Call (DNC) List ────────────────────────────────────────
+
+export const dncReasonEnum = pgEnum('dnc_reason', [
+  'manual',           // Added manually by user
+  'opt_out',          // Contact opted out during a call
+  'dtmf_opt_out',     // Pressed a DTMF key to opt out
+  'legal',            // Legal/regulatory requirement
+  'complaint',        // Received a complaint
+  'imported',         // Imported from CSV or external list
+]);
+
+export const dncList = pgTable('dnc_list', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id).notNull(),
+  phoneNumber: varchar('phone_number', { length: 20 }).notNull(),
+  reason: dncReasonEnum('reason').default('manual').notNull(),
+  source: varchar('source', { length: 255 }), // Who/what added this entry
+  notes: text('notes'),
+  contactId: uuid('contact_id').references(() => contacts.id),
+  callId: uuid('call_id').references(() => calls.id), // The call that triggered the opt-out
+  expiresAt: timestamp('expires_at'), // Optional expiry for temporary blocks
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Calling Hours Configuration (per org)
+export const callingHoursConfig = pgTable('calling_hours_config', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id).notNull(),
+  name: varchar('name', { length: 255 }).notNull().default('Default'),
+  isDefault: boolean('is_default').default(true),
+  enabled: boolean('enabled').default(true),
+
+  // Per-day schedule: { "monday": { start: "09:00", end: "20:00" }, ... }
+  weeklySchedule: jsonb('weekly_schedule').default({
+    monday: { start: '09:00', end: '20:00' },
+    tuesday: { start: '09:00', end: '20:00' },
+    wednesday: { start: '09:00', end: '20:00' },
+    thursday: { start: '09:00', end: '20:00' },
+    friday: { start: '09:00', end: '20:00' },
+    saturday: { start: '10:00', end: '18:00' },
+    sunday: null,
+  }).notNull(),
+
+  timezone: varchar('timezone', { length: 100 }).default('America/New_York').notNull(),
+  respectContactTimezone: boolean('respect_contact_timezone').default(true),
+
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// ─── SMS Messages ─────────────────────────────────────────────────
+
+export const messageDirectionEnum = pgEnum('message_direction', ['inbound', 'outbound']);
+export const messageStatusEnum = pgEnum('message_status', ['queued', 'sent', 'delivered', 'failed', 'received']);
+
+export const messages = pgTable('messages', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id).notNull(),
+  contactId: uuid('contact_id').references(() => contacts.id),
+  agentId: uuid('agent_id').references(() => agents.id),
+  campaignId: uuid('campaign_id').references(() => campaigns.id),
+
+  direction: messageDirectionEnum('direction').notNull(),
+  status: messageStatusEnum('status').default('queued').notNull(),
+  fromNumber: varchar('from_number', { length: 20 }).notNull(),
+  toNumber: varchar('to_number', { length: 20 }).notNull(),
+  body: text('body').notNull(),
+
+  // Provider tracking
+  provider: varchar('provider', { length: 50 }).default('telnyx'),
+  externalId: varchar('external_id', { length: 255 }),
+
+  // Media (MMS)
+  mediaUrls: jsonb('media_urls').default([]),
+
+  // Cost
+  costCents: integer('cost_cents').default(0),
+  segments: integer('segments').default(1),
+
+  // Error
+  errorCode: varchar('error_code', { length: 50 }),
+  errorMessage: text('error_message'),
+
+  sentAt: timestamp('sent_at'),
+  deliveredAt: timestamp('delivered_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// ─── Inbound Routing: Ring Groups ─────────────────────────────────
+
+export const ringGroupStrategyEnum = pgEnum('ring_group_strategy', [
+  'simultaneous',  // Ring all members at once
+  'sequential',    // Ring members one by one
+  'round_robin',   // Rotate through members
+  'longest_idle',  // Ring the member idle the longest
+]);
+
+export const ringGroups = pgTable('ring_groups', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id).notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+  description: text('description'),
+
+  strategy: ringGroupStrategyEnum('strategy').default('simultaneous').notNull(),
+  ringTimeSeconds: integer('ring_time_seconds').default(30),
+  
+  // Members: array of { type: 'agent'|'number', id: string, priority: number }
+  members: jsonb('members').default([]).notNull(),
+
+  // Fallback when no one answers
+  fallbackAction: varchar('fallback_action', { length: 50 }).default('voicemail'), // voicemail, ivr, number, hangup
+  fallbackTarget: varchar('fallback_target', { length: 255 }), // IVR menu ID, phone number, etc.
+
+  // After-hours routing
+  afterHoursEnabled: boolean('after_hours_enabled').default(false),
+  afterHoursAction: varchar('after_hours_action', { length: 50 }).default('voicemail'),
+  afterHoursTarget: varchar('after_hours_target', { length: 255 }),
+  callingHoursConfigId: uuid('calling_hours_config_id').references(() => callingHoursConfig.id),
+
+  // Hold music / queue
+  holdMusicUrl: varchar('hold_music_url', { length: 500 }),
+  queueAnnouncement: text('queue_announcement'), // "Your call is important..."
+  maxQueueSize: integer('max_queue_size').default(10),
+  maxWaitSeconds: integer('max_wait_seconds').default(300),
+
+  // Phone number assignment: which inbound numbers route to this group
+  phoneNumberIds: jsonb('phone_number_ids').default([]),
+
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 // IVR Action Types
 export const ivrActionTypeEnum = pgEnum('ivr_action_type', [
   'play_message',      // Play audio/TTS message

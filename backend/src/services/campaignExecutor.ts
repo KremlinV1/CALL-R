@@ -1,10 +1,11 @@
 import { db } from '../db/index.js';
-import { campaigns, campaignContacts, calls, contacts, agents } from '../db/schema.js';
-import { eq, and, inArray, sql, lte, gte } from 'drizzle-orm';
+import { campaigns, campaignContacts, calls, contacts, agents, dncList, callingHoursConfig } from '../db/schema.js';
+import { eq, and, or, inArray, sql, lte, gte, isNull } from 'drizzle-orm';
 import axios from 'axios';
 import { io } from '../index.js';
 import { phoneNumberRotation } from './phoneNumberRotation.js';
 import { generateToken } from '../middleware/auth.js';
+import { usageService } from './usageService.js';
 
 interface CampaignExecution {
   campaignId: string;
@@ -318,6 +319,64 @@ export class CampaignExecutor {
         console.error(`Contact ${contactId} not found`);
         return;
       }
+
+      // ─── DNC & Calling Hours Compliance Check ────────────────────
+      const normalizedPhone = contact.phone.replace(/[^\d+]/g, '');
+      const dncEntry = await db
+        .select({ id: dncList.id })
+        .from(dncList)
+        .where(
+          and(
+            eq(dncList.organizationId, campaign.organizationId),
+            eq(dncList.phoneNumber, normalizedPhone),
+            or(isNull(dncList.expiresAt), gte(dncList.expiresAt, new Date()))
+          )
+        )
+        .limit(1);
+
+      if (dncEntry.length > 0) {
+        console.log(`🚫 Skipping DNC number ${contact.phone} for campaign ${campaignId}`);
+        await db.update(campaignContacts)
+          .set({ status: 'failed', lastError: 'Number is on Do Not Call list' })
+          .where(and(eq(campaignContacts.campaignId, campaignId), eq(campaignContacts.contactId, contactId)));
+        return;
+      }
+
+      // Check calling hours
+      const [hoursConfig] = await db
+        .select()
+        .from(callingHoursConfig)
+        .where(and(eq(callingHoursConfig.organizationId, campaign.organizationId), eq(callingHoursConfig.isDefault, true)))
+        .limit(1);
+
+      if (hoursConfig?.enabled) {
+        const tz = campaign.timezone || hoursConfig.timezone || 'America/New_York';
+        if (!isWithinCallingHoursSync(hoursConfig.weeklySchedule as any, tz)) {
+          console.log(`🕐 Outside calling hours (${tz}) — skipping ${contact.phone}`);
+          // Re-queue instead of failing
+          await db.update(campaignContacts)
+            .set({ status: 'pending' })
+            .where(and(eq(campaignContacts.campaignId, campaignId), eq(campaignContacts.contactId, contactId)));
+          return;
+        }
+      }
+      // ─── Minutes Check ─────────────────────────────────────────────
+      const usageCheck = await usageService.checkMinutes(campaign.organizationId);
+      if (!usageCheck.allowed) {
+        console.log(`⛔ No minutes remaining for org ${campaign.organizationId} — pausing campaign ${campaignId}`);
+        // Pause the campaign rather than failing individual contacts
+        await db.update(campaigns)
+          .set({ status: 'paused' })
+          .where(eq(campaigns.id, campaignId));
+        const execution = activeCampaigns.get(campaignId);
+        if (execution) {
+          execution.isRunning = false;
+          activeCampaigns.delete(campaignId);
+        }
+        io.emit('campaign:paused', { campaignId, reason: 'No minutes remaining' });
+        return;
+      }
+      // ─── End Minutes Check ───────────────────────────────────────
       
       // Determine which phone number to use
       let fromNumber = process.env.VONAGE_PHONE_NUMBER || '';
@@ -568,3 +627,32 @@ export class CampaignExecutor {
 
 // Export singleton instance
 export const campaignExecutor = new CampaignExecutor();
+
+// ─── Helper: Calling Hours Check ─────────────────────────────────
+function isWithinCallingHoursSync(
+  weeklySchedule: Record<string, { start: string; end: string } | null>,
+  timezone: string
+): boolean {
+  try {
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      weekday: 'long',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(now);
+    const weekday = parts.find(p => p.type === 'weekday')?.value?.toLowerCase() || '';
+    const hour = parts.find(p => p.type === 'hour')?.value || '00';
+    const minute = parts.find(p => p.type === 'minute')?.value || '00';
+    const currentTime = `${hour}:${minute}`;
+
+    const daySchedule = weeklySchedule[weekday];
+    if (!daySchedule) return false;
+
+    return currentTime >= daySchedule.start && currentTime <= daySchedule.end;
+  } catch {
+    return true; // Default allow on error
+  }
+}
