@@ -37,7 +37,7 @@ export default function LoginPage() {
       toast.success(`Welcome back, ${data.user.firstName}!`)
       
       // Redirect to dashboard
-      router.push("/")
+      router.push("/dashboard")
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Login failed"
       setError(errorMessage)

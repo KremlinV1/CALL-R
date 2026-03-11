@@ -40,7 +40,7 @@ export default function SignupPage() {
       toast.success(`Welcome to Pon E Line, ${data.user.firstName}!`)
       
       // Redirect to dashboard
-      router.push("/")
+      router.push("/dashboard")
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Registration failed"
       setError(errorMessage)
