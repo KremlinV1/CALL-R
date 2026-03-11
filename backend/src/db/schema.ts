@@ -225,6 +225,7 @@ export const phoneNumbers = pgTable('phone_numbers', {
   id: uuid('id').primaryKey().defaultRandom(),
   organizationId: uuid('organization_id').references(() => organizations.id).notNull(),
   agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'set null' }),
+  callerIdProfileId: uuid('caller_id_profile_id').references(() => callerIdProfiles.id, { onDelete: 'set null' }),
   number: varchar('number', { length: 20 }).unique().notNull(),
   provider: varchar('provider', { length: 50 }).notNull(),
   providerSid: varchar('provider_sid', { length: 255 }),

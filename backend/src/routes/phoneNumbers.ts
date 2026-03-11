@@ -39,7 +39,7 @@ router.post('/db', async (req: AuthRequest, res: Response) => {
     const organizationId = (req as any).user?.organizationId;
     if (!organizationId) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { number, provider, providerSid, label, type, capabilities, agentId } = req.body;
+    const { number, provider, providerSid, label, type, capabilities, agentId, callerIdProfileId } = req.body;
 
     if (!number) return res.status(400).json({ error: 'number is required' });
 
@@ -58,6 +58,7 @@ router.post('/db', async (req: AuthRequest, res: Response) => {
       type: type || 'local',
       capabilities: capabilities || { voice: true, sms: false },
       agentId: agentId || null,
+      callerIdProfileId: callerIdProfileId || null,
       status: 'active',
     }).returning();
 
@@ -74,11 +75,12 @@ router.put('/db/:id', async (req: AuthRequest, res: Response) => {
     const organizationId = (req as any).user?.organizationId;
     if (!organizationId) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { label, agentId, status, capabilities, type } = req.body;
+    const { label, agentId, callerIdProfileId, status, capabilities, type } = req.body;
 
     const updateData: any = { updatedAt: new Date() };
     if (label !== undefined) updateData.label = label;
     if (agentId !== undefined) updateData.agentId = agentId || null;
+    if (callerIdProfileId !== undefined) updateData.callerIdProfileId = callerIdProfileId || null;
     if (status !== undefined) updateData.status = status;
     if (capabilities !== undefined) updateData.capabilities = capabilities;
     if (type !== undefined) updateData.type = type;

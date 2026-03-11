@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import {
   Phone, Loader2, Trash2, Plus, Search, Edit, Download, ShoppingCart,
-  Check, X, Tag, Bot, Globe, PhoneCall, MessageSquare,
+  Check, X, Tag, Bot, Globe, PhoneCall, MessageSquare, Shield,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -27,6 +27,15 @@ import { toast } from 'sonner';
 
 const API_URL = `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"}/api`;
 
+interface CallerIdProfile {
+  id: string;
+  name: string;
+  displayNumber: string;
+  displayName: string | null;
+  mode: string;
+  isDefault: boolean;
+}
+
 interface PhoneNumber {
   id: string;
   number: string;
@@ -36,6 +45,7 @@ interface PhoneNumber {
   type: string;
   status: string;
   agentId: string | null;
+  callerIdProfileId: string | null;
   capabilities: {
     voice?: boolean;
     sms?: boolean;
@@ -104,7 +114,19 @@ export default function PhoneNumbersPage() {
     enabled: !!token,
   });
 
+  const { data: callerIdData } = useQuery({
+    queryKey: ['caller-id-profiles'],
+    queryFn: async () => {
+      const res = await axios.get(`${API_URL}/caller-id`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return res.data;
+    },
+    enabled: !!token,
+  });
+
   const agentsList: { id: string; name: string }[] = agentsData?.agents || [];
+  const callerIdProfiles: CallerIdProfile[] = callerIdData?.profiles || [];
   const phoneNumbers = data?.numbers || [];
   const filtered = phoneNumbers.filter(
     (n) =>
@@ -129,7 +151,7 @@ export default function PhoneNumbersPage() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: async ({ id, ...data }: { id: string; label?: string; agentId?: string | null; status?: string }) => {
+    mutationFn: async ({ id, ...data }: { id: string; label?: string; agentId?: string | null; callerIdProfileId?: string | null; status?: string }) => {
       const res = await axios.put(`${API_URL}/phone-numbers/db/${id}`, data, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -305,6 +327,14 @@ export default function PhoneNumbersPage() {
                               <Bot className="h-3 w-3 mr-1" />{agent.name}
                             </Badge>
                           )}
+                          {(() => {
+                            const cid = callerIdProfiles.find((p) => p.id === num.callerIdProfileId);
+                            return cid ? (
+                              <Badge variant="outline" className="text-xs bg-blue-500/10 text-blue-600 border-blue-500/20">
+                                <Shield className="h-3 w-3 mr-1" />{cid.name} ({cid.displayNumber})
+                              </Badge>
+                            ) : null;
+                          })()}
                         </div>
                       </div>
                     </div>
@@ -342,6 +372,7 @@ export default function PhoneNumbersPage() {
         onOpenChange={setAddDialogOpen}
         token={token}
         agents={agentsList}
+        callerIdProfiles={callerIdProfiles}
       />
 
       {/* Edit Number Dialog */}
@@ -350,6 +381,7 @@ export default function PhoneNumbersPage() {
         onOpenChange={(v) => !v && setEditingNumber(null)}
         phoneNumber={editingNumber}
         agents={agentsList}
+        callerIdProfiles={callerIdProfiles}
         onSave={(data) => editingNumber && updateMutation.mutate({ id: editingNumber.id, ...data })}
         isSaving={updateMutation.isPending}
       />
@@ -374,25 +406,27 @@ export default function PhoneNumbersPage() {
 // ─── Add Number Dialog ──────────────────────────────────────────────────────
 
 function AddNumberDialog({
-  open, onOpenChange, token, agents,
+  open, onOpenChange, token, agents, callerIdProfiles,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   token: string | null;
   agents: { id: string; name: string }[];
+  callerIdProfiles: CallerIdProfile[];
 }) {
   const queryClient = useQueryClient();
   const [number, setNumber] = useState('');
   const [label, setLabel] = useState('');
   const [provider, setProvider] = useState('telnyx');
   const [agentId, setAgentId] = useState('');
+  const [callerIdProfileId, setCallerIdProfileId] = useState('');
   const [type, setType] = useState('local');
 
   const addMutation = useMutation({
     mutationFn: async () => {
       const res = await axios.post(
         `${API_URL}/phone-numbers/db`,
-        { number, label: label || undefined, provider, agentId: agentId || undefined, type },
+        { number, label: label || undefined, provider, agentId: agentId || undefined, callerIdProfileId: callerIdProfileId || undefined, type },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       return res.data;
@@ -401,7 +435,7 @@ function AddNumberDialog({
       toast.success('Phone number added');
       queryClient.invalidateQueries({ queryKey: ['phone-numbers'] });
       onOpenChange(false);
-      setNumber(''); setLabel(''); setAgentId('');
+      setNumber(''); setLabel(''); setAgentId(''); setCallerIdProfileId('');
     },
     onError: (err: any) => toast.error(err.response?.data?.error || 'Failed to add number'),
   });
@@ -461,6 +495,26 @@ function AddNumberDialog({
               </Select>
             </div>
           )}
+          {callerIdProfiles.length > 0 && (
+            <div className="space-y-2">
+              <Label>Caller ID Profile</Label>
+              <Select value={callerIdProfileId || 'none'} onValueChange={(v) => setCallerIdProfileId(v === 'none' ? '' : v)}>
+                <SelectTrigger><SelectValue placeholder="None" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None (use default)</SelectItem>
+                  {callerIdProfiles.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      <span className="flex items-center gap-2">
+                        <Shield className="h-3 w-3" />
+                        {p.name} — {p.displayNumber}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">Outbound calls from this number will show the selected caller ID</p>
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
@@ -477,17 +531,19 @@ function AddNumberDialog({
 // ─── Edit Number Dialog ─────────────────────────────────────────────────────
 
 function EditNumberDialog({
-  open, onOpenChange, phoneNumber, agents, onSave, isSaving,
+  open, onOpenChange, phoneNumber, agents, callerIdProfiles, onSave, isSaving,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   phoneNumber: PhoneNumber | null;
   agents: { id: string; name: string }[];
-  onSave: (data: { label?: string; agentId?: string | null; status?: string }) => void;
+  callerIdProfiles: CallerIdProfile[];
+  onSave: (data: { label?: string; agentId?: string | null; callerIdProfileId?: string | null; status?: string }) => void;
   isSaving: boolean;
 }) {
   const [label, setLabel] = useState('');
   const [agentId, setAgentId] = useState('');
+  const [callerIdProfileId, setCallerIdProfileId] = useState('');
   const [status, setStatus] = useState('active');
 
   // Sync state when phone number changes
@@ -495,6 +551,7 @@ function EditNumberDialog({
     if (phoneNumber) {
       setLabel(phoneNumber.label || '');
       setAgentId(phoneNumber.agentId || '');
+      setCallerIdProfileId(phoneNumber.callerIdProfileId || '');
       setStatus(phoneNumber.status || 'active');
     }
   });
@@ -536,11 +593,31 @@ function EditNumberDialog({
               </Select>
             </div>
           )}
+          {callerIdProfiles.length > 0 && (
+            <div className="space-y-2">
+              <Label>Caller ID Profile</Label>
+              <Select value={callerIdProfileId || 'none'} onValueChange={(v) => setCallerIdProfileId(v === 'none' ? '' : v)}>
+                <SelectTrigger><SelectValue placeholder="None" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None (use default)</SelectItem>
+                  {callerIdProfiles.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      <span className="flex items-center gap-2">
+                        <Shield className="h-3 w-3" />
+                        {p.name} — {p.displayNumber}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">Outbound calls from this number will show the selected caller ID</p>
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button
-            onClick={() => onSave({ label, agentId: agentId || null, status })}
+            onClick={() => onSave({ label, agentId: agentId || null, callerIdProfileId: callerIdProfileId || null, status })}
             disabled={isSaving}
           >
             {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
