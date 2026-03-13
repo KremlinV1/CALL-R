@@ -45,6 +45,7 @@ import {
   Radio,
   ShieldAlert,
   MessageSquare,
+  Server,
 } from "lucide-react"
 import { useAuthStore } from "@/stores/auth-store"
 import { toast } from "sonner"
@@ -63,6 +64,7 @@ const navSections = [
     items: [
       { title: "Phone Numbers", href: "/phone-numbers", icon: Phone },
       { title: "Phone Pools", href: "/phone-pools", icon: PhoneCall },
+      { title: "SIP Trunks", href: "/settings/sip-trunks", icon: Server },
       { title: "Campaigns", href: "/campaigns", icon: Megaphone },
     ],
   },

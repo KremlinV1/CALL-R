@@ -88,6 +88,7 @@ export default function PhoneNumbersPage() {
   const [editingNumber, setEditingNumber] = useState<PhoneNumber | null>(null);
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [didwwImportOpen, setDidwwImportOpen] = useState(false);
   const [filterQuery, setFilterQuery] = useState('');
 
   // ─── Data Queries ───────────────────────────────────────────────────
@@ -182,6 +183,10 @@ export default function PhoneNumbersPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setDidwwImportOpen(true)}>
+            <Download className="mr-2 h-4 w-4" />
+            Import from DIDWW
+          </Button>
           <Button variant="outline" onClick={() => setImportDialogOpen(true)}>
             <Download className="mr-2 h-4 w-4" />
             Import from Telnyx
@@ -397,6 +402,13 @@ export default function PhoneNumbersPage() {
       <ImportDialog
         open={importDialogOpen}
         onOpenChange={setImportDialogOpen}
+        token={token}
+      />
+
+      {/* Import from DIDWW Dialog */}
+      <DIDWWImportDialog
+        open={didwwImportOpen}
+        onOpenChange={setDidwwImportOpen}
         token={token}
       />
     </div>
@@ -853,6 +865,167 @@ function ImportDialog({
                       <Badge variant={num.status === 'active' ? 'default' : 'secondary'} className="text-xs">
                         {num.status}
                       </Badge>
+                    </div>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={handleImport} disabled={selected.size === 0 || importMutation.isPending}>
+            {importMutation.isPending ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="mr-2 h-4 w-4" />
+            )}
+            Import {selected.size} Number{selected.size !== 1 ? 's' : ''}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── DIDWW Import Dialog ─────────────────────────────────────────────────────
+
+interface DIDWWNumber {
+  id: string;
+  number: string;
+  status: string;
+  type: string;
+  trunkId: string | null;
+}
+
+function DIDWWImportDialog({
+  open, onOpenChange, token,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  token: string | null;
+}) {
+  const queryClient = useQueryClient();
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  const didwwQuery = useQuery({
+    queryKey: ['didww-dids'],
+    queryFn: async () => {
+      const res = await axios.get(`${API_URL}/didww/dids`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return res.data;
+    },
+    enabled: !!token && open,
+  });
+
+  const balanceQuery = useQuery({
+    queryKey: ['didww-balance'],
+    queryFn: async () => {
+      const res = await axios.get(`${API_URL}/didww/balance`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return res.data;
+    },
+    enabled: !!token && open,
+  });
+
+  const importMutation = useMutation({
+    mutationFn: async (numbers: { number: string; id: string; type: string }[]) => {
+      const res = await axios.post(
+        `${API_URL}/didww/dids/import`,
+        { numbers },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      return res.data;
+    },
+    onSuccess: (data) => {
+      toast.success(`Imported ${data.imported} number(s)${data.skipped ? `, ${data.skipped} already existed` : ''}`);
+      queryClient.invalidateQueries({ queryKey: ['phone-numbers'] });
+      setSelected(new Set());
+      onOpenChange(false);
+    },
+    onError: () => toast.error('Failed to import numbers'),
+  });
+
+  const owned: DIDWWNumber[] = didwwQuery.data?.numbers || [];
+
+  const toggleSelect = (id: string) => {
+    const next = new Set(selected);
+    next.has(id) ? next.delete(id) : next.add(id);
+    setSelected(next);
+  };
+
+  const handleImport = () => {
+    const nums = owned
+      .filter((n) => selected.has(n.id))
+      .map((n) => ({ number: n.number, id: n.id, type: n.type }));
+    importMutation.mutate(nums);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Import from DIDWW Account</DialogTitle>
+          <DialogDescription>
+            Select DID numbers from your DIDWW account to import into the pool
+            {balanceQuery.data && (
+              <span className="ml-2 font-medium text-foreground">
+                • Balance: ${balanceQuery.data.balance} {balanceQuery.data.currency}
+              </span>
+            )}
+          </DialogDescription>
+        </DialogHeader>
+
+        {didwwQuery.isLoading ? (
+          <div className="text-center py-8">
+            <Loader2 className="mx-auto h-6 w-6 animate-spin text-muted-foreground" />
+            <p className="text-sm text-muted-foreground mt-2">Loading DIDWW numbers...</p>
+          </div>
+        ) : didwwQuery.error ? (
+          <div className="text-center py-8">
+            <X className="mx-auto h-8 w-8 text-destructive mb-2" />
+            <p className="text-sm text-muted-foreground">
+              {(didwwQuery.error as any)?.response?.data?.error || 'Failed to load DIDWW numbers'}
+            </p>
+          </div>
+        ) : owned.length === 0 ? (
+          <p className="text-center text-sm text-muted-foreground py-6">No DID numbers found in your DIDWW account.</p>
+        ) : (
+          <>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm text-muted-foreground">{owned.length} DIDs found, {selected.size} selected</p>
+              <Button variant="ghost" size="sm" onClick={() => setSelected(selected.size === owned.length ? new Set() : new Set(owned.map((n) => n.id)))}>
+                {selected.size === owned.length ? 'Deselect All' : 'Select All'}
+              </Button>
+            </div>
+            <div className="space-y-2 max-h-[400px] overflow-y-auto">
+              {owned.map((num) => (
+                <label
+                  key={num.id}
+                  className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-accent transition-colors ${
+                    selected.has(num.id) ? 'border-primary bg-primary/5' : ''
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.has(num.id)}
+                    onChange={() => toggleSelect(num.id)}
+                    className="h-4 w-4"
+                  />
+                  <div className="flex-1">
+                    <p className="font-mono font-medium">{formatPhoneNumber(num.number)}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <Badge variant="outline" className="text-xs">DIDWW</Badge>
+                      <Badge variant="outline" className="text-xs">{num.type}</Badge>
+                      <Badge variant={num.status === 'active' ? 'default' : 'secondary'} className="text-xs">
+                        {num.status}
+                      </Badge>
+                      {num.trunkId && (
+                        <Badge variant="secondary" className="text-xs">Trunk assigned</Badge>
+                      )}
                     </div>
                   </div>
                 </label>
