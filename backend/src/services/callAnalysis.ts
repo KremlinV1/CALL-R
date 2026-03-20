@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import { db } from '../db';
 import { calls } from '../db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and, isNull, isNotNull, inArray } from 'drizzle-orm';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -109,8 +109,6 @@ ${call.transcript}
  * Batch analyze all completed calls that don't have a summary yet.
  */
 export async function analyzeUnprocessedCalls(): Promise<number> {
-  const { and, isNull, isNotNull, inArray } = await import('drizzle-orm');
-
   const unprocessed = await db
     .select({ id: calls.id })
     .from(calls)
