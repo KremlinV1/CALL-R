@@ -21,5 +21,5 @@ COPY . .
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# Run the agent
-CMD ["python", "agent.py", "start"]
+# Run the bank IVR agent
+CMD ["python", "bank_ivr_agent.py", "start"]

@@ -30,3 +30,29 @@ services:
       - key: VOGENT_WEBHOOK_URL
         sync: false
     healthCheckPath: /health
+
+  - type: worker
+    name: bank-ivr-agent
+    runtime: docker
+    region: oregon
+    rootDir: agents
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: LIVEKIT_URL
+        sync: false
+      - key: LIVEKIT_API_KEY
+        sync: false
+      - key: LIVEKIT_API_SECRET
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: CARTESIA_API_KEY
+        sync: false
+      - key: DEEPGRAM_API_KEY
+        sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: BACKEND_URL
+        sync: false
+      - key: BACKEND_API_TOKEN
+        sync: false
