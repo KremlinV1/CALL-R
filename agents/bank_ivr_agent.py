@@ -859,9 +859,8 @@ async def entrypoint(ctx: JobContext):
     logger.info(f"Saying welcome message: {welcome[:50]}...")
     await session.say(welcome)
     
-    # Keep the agent running until the session ends
-    # This is critical - without this, the agent exits immediately
-    await session.wait()
+    # The LiveKit agents framework keeps the entrypoint alive automatically
+    # through the WorkerOptions/cli.run_app pattern - no explicit wait needed
 
 
 if __name__ == "__main__":
