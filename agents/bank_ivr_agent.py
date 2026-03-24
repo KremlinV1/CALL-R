@@ -858,6 +858,10 @@ async def entrypoint(ctx: JobContext):
     welcome = agent._get_welcome_message()
     logger.info(f"Saying welcome message: {welcome[:50]}...")
     await session.say(welcome)
+    
+    # Keep the agent running until the session ends
+    # This is critical - without this, the agent exits immediately
+    await session.wait()
 
 
 if __name__ == "__main__":
