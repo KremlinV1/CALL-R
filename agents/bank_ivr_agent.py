@@ -13,7 +13,7 @@ from enum import Enum
 from dotenv import load_dotenv
 from loguru import logger
 
-from livekit import api
+from livekit import api, rtc
 from livekit.protocol.sip import TransferSIPParticipantRequest
 from livekit.agents import (
     Agent,
@@ -119,6 +119,9 @@ class BankIVRAgent(Agent):
         self.language = "english"
         self.failed_auth_attempts = 0
         self.max_auth_attempts = 3
+        self.session = None  # Will be set when session starts
+        self.dtmf_buffer = ""  # Buffer for multi-digit DTMF input
+        self.awaiting_pin = False  # Flag for PIN entry mode
         
         # Initialize STT
         if DEEPGRAM_API_KEY and DEEPGRAM_API_KEY != "your_deepgram_key":
@@ -223,6 +226,293 @@ Authenticated: {self.authenticated}
     async def on_enter(self):
         """Called when the agent starts - handled by entrypoint."""
         pass
+    
+    def set_session(self, session: AgentSession):
+        """Set the session reference for DTMF handling."""
+        self.session = session
+    
+    async def handle_dtmf(self, digit: str) -> None:
+        """
+        Handle incoming DTMF digit from caller's keypad.
+        This is the core DTMF navigation handler.
+        """
+        logger.info(f"DTMF received: {digit} | State: {self.current_state.value} | Buffer: {self.dtmf_buffer}")
+        
+        # Handle pound key (#) as confirmation/submit
+        if digit == "#":
+            if self.dtmf_buffer:
+                await self._process_dtmf_input(self.dtmf_buffer)
+                self.dtmf_buffer = ""
+            return
+        
+        # Handle star key (*) as repeat/cancel
+        if digit == "*":
+            self.dtmf_buffer = ""
+            response = await self._get_current_menu_prompt()
+            if self.session:
+                await self.session.say(response)
+            return
+        
+        # For single-digit menu selections, process immediately
+        if self.current_state in [MenuState.WELCOME, MenuState.LANGUAGE_SELECT, 
+                                   MenuState.MAIN_MENU, MenuState.ACCOUNT_SERVICES,
+                                   MenuState.CARD_SERVICES, MenuState.LOAN_SERVICES,
+                                   MenuState.TRANSFERS, MenuState.BILL_PAY]:
+            await self._process_dtmf_input(digit)
+        else:
+            # For multi-digit input (account number, PIN), buffer the digits
+            self.dtmf_buffer += digit
+            
+            # Auto-submit after 4 digits for account number or PIN
+            if len(self.dtmf_buffer) >= 4:
+                await self._process_dtmf_input(self.dtmf_buffer)
+                self.dtmf_buffer = ""
+    
+    async def _get_current_menu_prompt(self) -> str:
+        """Get the appropriate menu prompt for the current state."""
+        if self.current_state == MenuState.WELCOME or self.current_state == MenuState.LANGUAGE_SELECT:
+            return self._get_welcome_message()
+        elif self.current_state == MenuState.MAIN_MENU:
+            return self._get_main_menu()
+        elif self.current_state == MenuState.ACCOUNT_SERVICES:
+            return self._get_account_services_menu()
+        elif self.current_state == MenuState.CARD_SERVICES:
+            return self._get_card_services_menu()
+        elif self.current_state == MenuState.TRANSFERS:
+            return self._get_transfers_menu()
+        elif self.current_state == MenuState.AUTHENTICATION:
+            if self.awaiting_pin:
+                return "Please enter your 4-digit PIN."
+            return "Please enter your 4-digit account number."
+        else:
+            return self._get_main_menu()
+    
+    async def _process_dtmf_input(self, input_value: str) -> None:
+        """Process DTMF input based on current menu state."""
+        logger.info(f"Processing DTMF input: {input_value} in state: {self.current_state.value}")
+        
+        response = ""
+        
+        # Language Selection
+        if self.current_state in [MenuState.WELCOME, MenuState.LANGUAGE_SELECT]:
+            if input_value == "1":
+                self.language = "english"
+                self.current_state = MenuState.MAIN_MENU
+                response = f"You've selected English. Welcome to {BANK_NAME}. " + self._get_main_menu()
+            elif input_value == "2":
+                self.language = "spanish"
+                self.current_state = MenuState.MAIN_MENU
+                response = f"Ha seleccionado Español. Bienvenido a {BANK_NAME}. " + self._get_main_menu()
+            else:
+                response = "Invalid selection. " + self._get_welcome_message()
+        
+        # Main Menu Navigation
+        elif self.current_state == MenuState.MAIN_MENU:
+            if input_value == "1":  # Account Services
+                if not self.authenticated:
+                    self.current_state = MenuState.AUTHENTICATION
+                    self.awaiting_pin = False
+                    response = "To access your account information, please enter your 4-digit account number."
+                else:
+                    self.current_state = MenuState.ACCOUNT_SERVICES
+                    response = self._get_account_services_menu()
+            elif input_value == "2":  # Card Services
+                self.current_state = MenuState.CARD_SERVICES
+                response = self._get_card_services_menu()
+            elif input_value == "3":  # Loans
+                self.current_state = MenuState.LOAN_SERVICES
+                response = """Loans and Mortgages Menu.
+                    For personal loan information, press 1.
+                    For mortgage rates, press 2.
+                    For auto loans, press 3.
+                    To return to the main menu, press 9."""
+            elif input_value == "4":  # Transfers
+                if not self.authenticated:
+                    self.current_state = MenuState.AUTHENTICATION
+                    self.awaiting_pin = False
+                    response = "To make a transfer, please enter your 4-digit account number."
+                else:
+                    self.current_state = MenuState.TRANSFERS
+                    response = self._get_transfers_menu()
+            elif input_value == "5":  # Bill Pay
+                if not self.authenticated:
+                    self.current_state = MenuState.AUTHENTICATION
+                    self.awaiting_pin = False
+                    response = "To access Bill Pay, please enter your 4-digit account number."
+                else:
+                    self.current_state = MenuState.BILL_PAY
+                    response = """Bill Pay Menu.
+                        To pay a bill now, press 1.
+                        To schedule a payment, press 2.
+                        To view scheduled payments, press 3.
+                        To return to the main menu, press 9."""
+            elif input_value == "0":  # Customer Service
+                response = await self._handle_transfer_to_representative()
+            else:
+                response = "Invalid selection. " + self._get_main_menu()
+        
+        # Account Services Sub-Menu
+        elif self.current_state == MenuState.ACCOUNT_SERVICES:
+            if input_value == "1":  # Check Balance
+                response = await self._get_account_balances()
+            elif input_value == "2":  # Recent Transactions
+                response = await self._get_recent_transactions()
+            elif input_value == "3":  # Account Details
+                response = "Account details will be mailed to your address on file within 5 business days. " + self._get_account_services_menu()
+            elif input_value == "9":  # Back to Main
+                self.current_state = MenuState.MAIN_MENU
+                response = self._get_main_menu()
+            else:
+                response = "Invalid selection. " + self._get_account_services_menu()
+        
+        # Card Services Sub-Menu
+        elif self.current_state == MenuState.CARD_SERVICES:
+            if input_value == "1":  # Report Lost/Stolen
+                response = await self._handle_lost_card()
+            elif input_value == "2":  # Activate Card
+                response = "To activate your new card, please enter the last 4 digits of the card number."
+                self.current_state = MenuState.ACTIVATE_CARD
+            elif input_value == "3":  # Request Replacement
+                response = "A replacement card will be mailed to your address on file within 7 to 10 business days. " + self._get_card_services_menu()
+            elif input_value == "4":  # Change PIN
+                response = "To change your PIN, please visit any ATM or branch location. " + self._get_card_services_menu()
+            elif input_value == "9":  # Back to Main
+                self.current_state = MenuState.MAIN_MENU
+                response = self._get_main_menu()
+            else:
+                response = "Invalid selection. " + self._get_card_services_menu()
+        
+        # Transfers Sub-Menu
+        elif self.current_state == MenuState.TRANSFERS:
+            if input_value == "1":  # Between Accounts
+                response = "Transfer between accounts. Please enter the amount to transfer, followed by the pound key."
+            elif input_value == "2":  # To Another Person
+                response = "To send money to another person, please use our mobile app or online banking. " + self._get_transfers_menu()
+            elif input_value == "3":  # Wire Transfer
+                response = "For wire transfers, please visit a branch or call during business hours. " + self._get_transfers_menu()
+            elif input_value == "9":  # Back to Main
+                self.current_state = MenuState.MAIN_MENU
+                response = self._get_main_menu()
+            else:
+                response = "Invalid selection. " + self._get_transfers_menu()
+        
+        # Loan Services Sub-Menu
+        elif self.current_state == MenuState.LOAN_SERVICES:
+            if input_value == "9":  # Back to Main
+                self.current_state = MenuState.MAIN_MENU
+                response = self._get_main_menu()
+            else:
+                response = "For loan information, please visit our website or speak with a representative. Press 0 to speak with someone, or press 9 to return to the main menu."
+        
+        # Bill Pay Sub-Menu
+        elif self.current_state == MenuState.BILL_PAY:
+            if input_value == "9":  # Back to Main
+                self.current_state = MenuState.MAIN_MENU
+                response = self._get_main_menu()
+            else:
+                response = "Bill Pay feature coming soon. Press 9 to return to the main menu."
+        
+        # Authentication - Account Number Entry
+        elif self.current_state == MenuState.AUTHENTICATION and not self.awaiting_pin:
+            if len(input_value) == 4 and input_value.isdigit():
+                if input_value in MOCK_CUSTOMERS:
+                    self.customer_id = input_value
+                    self.awaiting_pin = True
+                    response = "Thank you. Now please enter your 4-digit PIN."
+                else:
+                    self.failed_auth_attempts += 1
+                    if self.failed_auth_attempts >= self.max_auth_attempts:
+                        response = "For security, access has been temporarily locked. Please try again later. Goodbye."
+                    else:
+                        response = f"Account not found. You have {self.max_auth_attempts - self.failed_auth_attempts} attempts remaining. Please enter your account number."
+            else:
+                response = "Please enter a valid 4-digit account number."
+        
+        # Authentication - PIN Entry
+        elif self.current_state == MenuState.AUTHENTICATION and self.awaiting_pin:
+            if len(input_value) == 4 and input_value.isdigit():
+                customer = MOCK_CUSTOMERS.get(self.customer_id)
+                if customer and input_value == customer["pin"]:
+                    self.authenticated = True
+                    self.current_customer = customer
+                    self.awaiting_pin = False
+                    self.failed_auth_attempts = 0
+                    self.current_state = MenuState.MAIN_MENU
+                    response = f"Thank you, {customer['name'].split()[0]}. Your identity has been verified. " + self._get_main_menu()
+                else:
+                    self.failed_auth_attempts += 1
+                    if self.failed_auth_attempts >= self.max_auth_attempts:
+                        response = "For security, access has been temporarily locked due to incorrect PIN attempts. Goodbye."
+                    else:
+                        response = f"Incorrect PIN. You have {self.max_auth_attempts - self.failed_auth_attempts} attempts remaining. Please enter your PIN."
+            else:
+                response = "Please enter a valid 4-digit PIN."
+        
+        # Card Activation
+        elif self.current_state == MenuState.ACTIVATE_CARD:
+            if len(input_value) == 4 and input_value.isdigit():
+                response = f"Your card ending in {input_value} has been activated. You may begin using it immediately. " + self._get_card_services_menu()
+                self.current_state = MenuState.CARD_SERVICES
+            else:
+                response = "Please enter the last 4 digits of your card."
+        
+        # Say the response
+        if response and self.session:
+            await self.session.say(response)
+    
+    async def _get_account_balances(self) -> str:
+        """Get account balances for authenticated customer."""
+        if not self.authenticated or not self.current_customer:
+            return "Please authenticate first. " + self._get_main_menu()
+        
+        accounts = self.current_customer["accounts"]
+        response_parts = ["Here are your account balances. "]
+        
+        for acc_type, acc in accounts.items():
+            if acc_type == "credit":
+                response_parts.append(f"Your {acc['type']} ending in {acc['number'][-4:]}: current balance ${abs(acc['balance']):,.2f}, available credit ${acc['available_credit']:,.2f}. ")
+            else:
+                response_parts.append(f"Your {acc['type']} ending in {acc['number'][-4:]}: ${acc['balance']:,.2f}. ")
+        
+        response_parts.append(self._get_account_services_menu())
+        return "".join(response_parts)
+    
+    async def _get_recent_transactions(self) -> str:
+        """Get recent transactions for authenticated customer."""
+        if not self.authenticated or not self.current_customer:
+            return "Please authenticate first. " + self._get_main_menu()
+        
+        transactions = self.current_customer["recent_transactions"][:5]
+        
+        if not transactions:
+            return "You have no recent transactions. " + self._get_account_services_menu()
+        
+        response_parts = [f"Here are your last {len(transactions)} transactions. "]
+        
+        for txn in transactions:
+            amount = txn["amount"]
+            if amount < 0:
+                response_parts.append(f"On {txn['date']}, {txn['description']}, debit of ${abs(amount):,.2f}. ")
+            else:
+                response_parts.append(f"On {txn['date']}, {txn['description']}, credit of ${amount:,.2f}. ")
+        
+        response_parts.append(self._get_account_services_menu())
+        return "".join(response_parts)
+    
+    async def _handle_lost_card(self) -> str:
+        """Handle lost/stolen card report."""
+        if self.authenticated and self.current_customer:
+            cards = self.current_customer.get("cards", [])
+            if cards:
+                card = cards[0]
+                return f"Your {card['type']} card ending in {card['last_four']} has been blocked immediately. A replacement will be mailed within 5 to 7 business days. " + self._get_card_services_menu()
+        return "To report a lost or stolen card, press 0 to speak with a representative immediately."
+    
+    async def _handle_transfer_to_representative(self) -> str:
+        """Handle transfer to customer service."""
+        return """Please hold while I connect you to a customer service representative.
+            Your estimated wait time is approximately 3 minutes.
+            Your call is important to us. Please stay on the line."""
     
     @function_tool
     async def select_language(self, context: RunContext, language: str) -> str:
@@ -688,9 +978,21 @@ async def entrypoint(ctx: JobContext):
         min_interruption_duration=0.5,
     )
     
+    # Set session reference on agent for DTMF handling
+    agent.set_session(session)
+    
+    # Register DTMF event handler
+    @ctx.room.on("sip_dtmf_received")
+    def on_dtmf_received(dtmf_event: rtc.SipDTMF):
+        """Handle incoming DTMF tones from caller's keypad."""
+        digit = dtmf_event.digit
+        logger.info(f"📞 DTMF digit received: {digit}")
+        # Schedule the async handler
+        asyncio.create_task(agent.handle_dtmf(digit))
+    
     await session.start(agent=agent, room=ctx.room)
     
-    logger.info("Bank IVR Agent is now active")
+    logger.info("Bank IVR Agent is now active with DTMF support")
     
     # Wait for audio subscription
     if session._room_io and session._room_io.subscribed_fut:
