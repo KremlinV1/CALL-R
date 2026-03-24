@@ -392,7 +392,7 @@ export default function ContactsPage() {
       const token = localStorage.getItem("token")
       const response = await axios.post(
         `${API_URL}/calls/outbound`,
-        { agentId, toNumber },
+        { agentId, toNumber, provider: 'livekit' },  // Use LiveKit SIP for outbound calls
         { headers: { Authorization: `Bearer ${token}` } }
       )
       return response.data

@@ -48,57 +48,76 @@ class MenuState(Enum):
     WELCOME = "welcome"
     LANGUAGE_SELECT = "language_select"
     MAIN_MENU = "main_menu"
-    ACCOUNT_SERVICES = "account_services"
-    CARD_SERVICES = "card_services"
-    LOAN_SERVICES = "loan_services"
-    TRANSFERS = "transfers"
-    BILL_PAY = "bill_pay"
+    CLAIM_SERVICES = "claim_services"
+    CLAIM_STATUS = "claim_status"
+    DISBURSEMENT = "disbursement"
+    UPDATE_INFO = "update_info"
     CUSTOMER_SERVICE = "customer_service"
     AUTHENTICATION = "authentication"
-    ACCOUNT_BALANCE = "account_balance"
-    RECENT_TRANSACTIONS = "recent_transactions"
-    REPORT_LOST_CARD = "report_lost_card"
-    ACTIVATE_CARD = "activate_card"
+    ENTER_CLAIM_CODE = "enter_claim_code"
+    ENTER_PIN = "enter_pin"
+    VERIFY_SSN = "verify_ssn"
 
 
-# Simulated customer database
-MOCK_CUSTOMERS = {
-    "1234": {
-        "name": "John Smith",
-        "pin": "5678",
-        "accounts": {
-            "checking": {"number": "****4521", "balance": 3247.89, "type": "Checking"},
-            "savings": {"number": "****8832", "balance": 15420.50, "type": "Savings"},
-            "credit": {"number": "****2211", "balance": -1523.45, "available_credit": 8476.55, "type": "Credit Card"},
-        },
-        "recent_transactions": [
-            {"date": "03/18", "description": "AMAZON.COM", "amount": -89.99, "account": "checking"},
-            {"date": "03/17", "description": "DIRECT DEPOSIT - ACME CORP", "amount": 2450.00, "account": "checking"},
-            {"date": "03/16", "description": "STARBUCKS", "amount": -6.75, "account": "checking"},
-            {"date": "03/15", "description": "TRANSFER TO SAVINGS", "amount": -500.00, "account": "checking"},
-            {"date": "03/14", "description": "NETFLIX", "amount": -15.99, "account": "credit"},
-        ],
-        "cards": [
-            {"type": "Debit", "last_four": "4521", "status": "active"},
-            {"type": "Credit", "last_four": "2211", "status": "active"},
-        ],
-        "phone": "+15551234567",
-    },
-    "5555": {
-        "name": "Jane Doe",
+# Simulated escrow claims database
+# Claim codes are 6 digits, PINs are 4 digits
+MOCK_ESCROW_CLAIMS = {
+    "123456": {
+        "claim_code": "123456",
         "pin": "1234",
-        "accounts": {
-            "checking": {"number": "****7788", "balance": 892.33, "type": "Checking"},
-            "savings": {"number": "****9900", "balance": 5200.00, "type": "Savings"},
-        },
-        "recent_transactions": [
-            {"date": "03/18", "description": "GROCERY STORE", "amount": -156.23, "account": "checking"},
-            {"date": "03/17", "description": "GAS STATION", "amount": -45.00, "account": "checking"},
-        ],
-        "cards": [
-            {"type": "Debit", "last_four": "7788", "status": "active"},
-        ],
-        "phone": "+15555555555",
+        "first_name": "John",
+        "last_name": "Smith",
+        "ssn_last_4": "4521",
+        "escrow_amount_cents": 1247500,  # $12,475.00
+        "escrow_type": "Federal Reserve Unclaimed Funds",
+        "originating_entity": "U.S. Department of Treasury",
+        "status": "pending",
+        "address": "123 Main Street",
+        "city": "New York",
+        "state": "NY",
+        "zip_code": "10001",
+        "phone": "+15551234567",
+        "disbursement_method": None,
+        "bank_routing": None,
+        "bank_account": None,
+    },
+    "789012": {
+        "claim_code": "789012",
+        "pin": "5678",
+        "first_name": "Jane",
+        "last_name": "Doe",
+        "ssn_last_4": "7890",
+        "escrow_amount_cents": 8532000,  # $85,320.00
+        "escrow_type": "Federal Reserve Escrow Account",
+        "originating_entity": "Federal Reserve Bank of New York",
+        "status": "verified",
+        "address": "456 Oak Avenue",
+        "city": "Los Angeles",
+        "state": "CA",
+        "zip_code": "90001",
+        "phone": "+15559876543",
+        "disbursement_method": "direct_deposit",
+        "bank_routing": "****1234",
+        "bank_account": "****5678",
+    },
+    "456789": {
+        "claim_code": "456789",
+        "pin": "9999",
+        "first_name": "Robert",
+        "last_name": "Johnson",
+        "ssn_last_4": "1122",
+        "escrow_amount_cents": 25000000,  # $250,000.00
+        "escrow_type": "Treasury Bond Maturity",
+        "originating_entity": "U.S. Treasury Department",
+        "status": "approved",
+        "address": "789 Pine Road",
+        "city": "Chicago",
+        "state": "IL",
+        "zip_code": "60601",
+        "phone": "+15553334444",
+        "disbursement_method": "wire",
+        "bank_routing": "****9876",
+        "bank_account": "****4321",
     },
 }
 
@@ -114,14 +133,15 @@ class BankIVRAgent(Agent):
         self.participant_identity = participant_identity
         self.current_state = MenuState.WELCOME
         self.authenticated = False
-        self.current_customer = None
-        self.customer_id = None
+        self.current_claim = None
+        self.claim_code = None
         self.language = "english"
         self.failed_auth_attempts = 0
         self.max_auth_attempts = 3
         self.session = None  # Will be set when session starts
         self.dtmf_buffer = ""  # Buffer for multi-digit DTMF input
         self.awaiting_pin = False  # Flag for PIN entry mode
+        self.awaiting_ssn = False  # Flag for SSN verification
         
         # Initialize STT
         if DEEPGRAM_API_KEY and DEEPGRAM_API_KEY != "your_deepgram_key":
@@ -137,32 +157,31 @@ class BankIVRAgent(Agent):
         else:
             tts = openai.TTS(voice="nova")
         
-        # Bank IVR system prompt
-        system_prompt = f"""You are the automated voice system for {BANK_NAME}. You are a professional, helpful, and secure banking assistant.
+        # Escrow Claims IVR system prompt
+        system_prompt = f"""You are the automated voice system for {BANK_NAME}. You are a professional, secure, and authoritative government escrow claims assistant.
 
 CRITICAL RULES:
-1. You are an IVR (Interactive Voice Response) system - be concise and clear
+1. You are an IVR (Interactive Voice Response) system - be concise, clear, and official-sounding
 2. Always offer menu options with numbers (Press 1 for..., Press 2 for...)
-3. For security, NEVER read out full account numbers - only last 4 digits
-4. If the customer is not authenticated, only allow: language selection, main menu navigation, and customer service transfer
-5. Require authentication (account number + PIN) before providing any account-specific information
-6. Be patient with customers - repeat options if asked
-7. Speak clearly and at a moderate pace
-8. Use professional banking terminology
-9. If a customer says a number (like "one" or "1"), treat it as a menu selection
-10. Always confirm important actions before executing them
+3. For security, NEVER read out full SSN, account numbers, or claim codes - only last 4 digits
+4. Require authentication (6-digit claim code + 4-digit PIN) before providing any claim information
+5. Be patient with claimants - repeat options if asked
+6. Speak clearly and at a moderate pace with an authoritative tone
+7. Use official government and banking terminology
+8. If a caller says a number (like "one" or "1"), treat it as a menu selection
+9. Always confirm important actions before executing them
 
 SECURITY PROTOCOLS:
-- Never reveal full account numbers
-- Lock account after 3 failed PIN attempts
-- Require re-authentication for sensitive operations
-- Mask sensitive information when speaking
+- Never reveal full claim codes or SSN
+- Lock claim after 3 failed verification attempts
+- Require re-verification for disbursement changes
+- Mask all sensitive information when speaking
 
 MENU STRUCTURE:
-- Main Menu: Account Services (1), Card Services (2), Loans (3), Transfers (4), Bill Pay (5), Customer Service (0)
-- Account Services: Check Balance (1), Recent Transactions (2), Account Details (3), Back to Main (9)
-- Card Services: Report Lost/Stolen (1), Activate New Card (2), Request Replacement (3), PIN Change (4), Back to Main (9)
-- Transfers: Between My Accounts (1), To Another Person (2), Wire Transfer (3), Back to Main (9)
+- Main Menu: Check Claim Status (1), Disbursement Options (2), Update Information (3), Speak to Claims Specialist (0)
+- Claim Status: View escrow amount, claim status, originating entity
+- Disbursement: Set up direct deposit, request check, wire transfer options
+- Update Info: Update address, phone, banking information
 
 Current State: {self.current_state.value}
 Authenticated: {self.authenticated}
@@ -183,44 +202,43 @@ Authenticated: {self.authenticated}
     
     def _get_welcome_message(self) -> str:
         """Generate the welcome message."""
-        return f"""Thank you for calling {BANK_NAME}. 
-        For English, press 1 or say English. 
-        Para Español, oprima 2 o diga Español."""
+        return f"""Thank you for calling the {BANK_NAME} claims verification line. 
+        This call may be recorded for quality and training purposes.
+        For English, press 1. 
+        Para Español, oprima 2."""
     
     def _get_main_menu(self) -> str:
         """Generate the main menu options."""
-        return f"""Main Menu. 
-        For Account Services, press 1. 
-        For Card Services, press 2. 
-        For Loans and Mortgages, press 3. 
-        For Transfers and Payments, press 4. 
-        For Bill Pay, press 5. 
-        To speak with a customer service representative, press 0. 
+        return f"""Escrow Claims Main Menu. 
+        To check your claim status, press 1. 
+        For disbursement options, press 2. 
+        To update your information, press 3. 
+        To speak with a claims specialist, press 0. 
         To repeat these options, press star."""
     
-    def _get_account_services_menu(self) -> str:
-        """Generate account services sub-menu."""
-        return """Account Services Menu.
-        To check your account balance, press 1.
-        For recent transactions, press 2.
-        For account details and statements, press 3.
+    def _get_claim_status_menu(self) -> str:
+        """Generate claim status sub-menu."""
+        return """Claim Status Menu.
+        To hear your escrow balance, press 1.
+        To hear your claim status, press 2.
+        To hear claim details, press 3.
         To return to the main menu, press 9."""
     
-    def _get_card_services_menu(self) -> str:
-        """Generate card services sub-menu."""
-        return """Card Services Menu.
-        To report a lost or stolen card, press 1.
-        To activate a new card, press 2.
-        To request a replacement card, press 3.
-        To change your PIN, press 4.
+    def _get_disbursement_menu(self) -> str:
+        """Generate disbursement options sub-menu."""
+        return """Disbursement Options Menu.
+        To set up direct deposit, press 1.
+        To request a check, press 2.
+        For wire transfer options, press 3.
+        To check disbursement status, press 4.
         To return to the main menu, press 9."""
     
-    def _get_transfers_menu(self) -> str:
-        """Generate transfers sub-menu."""
-        return """Transfers Menu.
-        To transfer between your accounts, press 1.
-        To send money to another person, press 2.
-        For wire transfers, press 3.
+    def _get_update_info_menu(self) -> str:
+        """Generate update information sub-menu."""
+        return """Update Information Menu.
+        To update your mailing address, press 1.
+        To update your phone number, press 2.
+        To update your banking information, press 3.
         To return to the main menu, press 9."""
     
     async def on_enter(self):
@@ -255,16 +273,21 @@ Authenticated: {self.authenticated}
         
         # For single-digit menu selections, process immediately
         if self.current_state in [MenuState.WELCOME, MenuState.LANGUAGE_SELECT, 
-                                   MenuState.MAIN_MENU, MenuState.ACCOUNT_SERVICES,
-                                   MenuState.CARD_SERVICES, MenuState.LOAN_SERVICES,
-                                   MenuState.TRANSFERS, MenuState.BILL_PAY]:
+                                   MenuState.MAIN_MENU, MenuState.CLAIM_STATUS,
+                                   MenuState.DISBURSEMENT, MenuState.UPDATE_INFO]:
             await self._process_dtmf_input(digit)
         else:
-            # For multi-digit input (account number, PIN), buffer the digits
+            # For multi-digit input (claim code, PIN, SSN), buffer the digits
             self.dtmf_buffer += digit
             
-            # Auto-submit after 4 digits for account number or PIN
-            if len(self.dtmf_buffer) >= 4:
+            # Auto-submit based on expected length
+            if self.current_state == MenuState.ENTER_CLAIM_CODE and len(self.dtmf_buffer) >= 6:
+                await self._process_dtmf_input(self.dtmf_buffer)
+                self.dtmf_buffer = ""
+            elif self.current_state == MenuState.ENTER_PIN and len(self.dtmf_buffer) >= 4:
+                await self._process_dtmf_input(self.dtmf_buffer)
+                self.dtmf_buffer = ""
+            elif self.current_state == MenuState.VERIFY_SSN and len(self.dtmf_buffer) >= 4:
                 await self._process_dtmf_input(self.dtmf_buffer)
                 self.dtmf_buffer = ""
     
@@ -274,16 +297,18 @@ Authenticated: {self.authenticated}
             return self._get_welcome_message()
         elif self.current_state == MenuState.MAIN_MENU:
             return self._get_main_menu()
-        elif self.current_state == MenuState.ACCOUNT_SERVICES:
-            return self._get_account_services_menu()
-        elif self.current_state == MenuState.CARD_SERVICES:
-            return self._get_card_services_menu()
-        elif self.current_state == MenuState.TRANSFERS:
-            return self._get_transfers_menu()
-        elif self.current_state == MenuState.AUTHENTICATION:
-            if self.awaiting_pin:
-                return "Please enter your 4-digit PIN."
-            return "Please enter your 4-digit account number."
+        elif self.current_state == MenuState.CLAIM_STATUS:
+            return self._get_claim_status_menu()
+        elif self.current_state == MenuState.DISBURSEMENT:
+            return self._get_disbursement_menu()
+        elif self.current_state == MenuState.UPDATE_INFO:
+            return self._get_update_info_menu()
+        elif self.current_state == MenuState.ENTER_CLAIM_CODE:
+            return "Please enter your 6-digit claim code."
+        elif self.current_state == MenuState.ENTER_PIN:
+            return "Please enter your 4-digit security PIN."
+        elif self.current_state == MenuState.VERIFY_SSN:
+            return "For verification, please enter the last 4 digits of your Social Security Number."
         else:
             return self._get_main_menu()
     
@@ -297,221 +322,190 @@ Authenticated: {self.authenticated}
         if self.current_state in [MenuState.WELCOME, MenuState.LANGUAGE_SELECT]:
             if input_value == "1":
                 self.language = "english"
-                self.current_state = MenuState.MAIN_MENU
-                response = f"You've selected English. Welcome to {BANK_NAME}. " + self._get_main_menu()
+                self.current_state = MenuState.ENTER_CLAIM_CODE
+                response = f"You've selected English. Welcome to the {BANK_NAME} claims verification system. To access your escrow account, please enter your 6-digit claim code now."
             elif input_value == "2":
                 self.language = "spanish"
-                self.current_state = MenuState.MAIN_MENU
-                response = f"Ha seleccionado Español. Bienvenido a {BANK_NAME}. " + self._get_main_menu()
+                self.current_state = MenuState.ENTER_CLAIM_CODE
+                response = f"Ha seleccionado Español. Bienvenido al sistema de verificación de reclamos de {BANK_NAME}. Para acceder a su cuenta de depósito, ingrese su código de reclamo de 6 dígitos."
             else:
                 response = "Invalid selection. " + self._get_welcome_message()
         
+        # Claim Code Entry
+        elif self.current_state == MenuState.ENTER_CLAIM_CODE:
+            if len(input_value) == 6 and input_value.isdigit():
+                if input_value in MOCK_ESCROW_CLAIMS:
+                    self.claim_code = input_value
+                    self.current_state = MenuState.ENTER_PIN
+                    response = "Claim code verified. Now please enter your 4-digit security PIN."
+                else:
+                    self.failed_auth_attempts += 1
+                    if self.failed_auth_attempts >= self.max_auth_attempts:
+                        response = "For security purposes, this line has been temporarily locked due to multiple invalid attempts. Please contact our claims department directly. Goodbye."
+                    else:
+                        response = f"Claim code not found in our system. You have {self.max_auth_attempts - self.failed_auth_attempts} attempts remaining. Please enter your 6-digit claim code."
+            else:
+                response = "Invalid entry. Please enter your 6-digit claim code."
+        
+        # PIN Entry
+        elif self.current_state == MenuState.ENTER_PIN:
+            if len(input_value) == 4 and input_value.isdigit():
+                claim = MOCK_ESCROW_CLAIMS.get(self.claim_code)
+                if claim and input_value == claim["pin"]:
+                    self.authenticated = True
+                    self.current_claim = claim
+                    self.failed_auth_attempts = 0
+                    self.current_state = MenuState.MAIN_MENU
+                    amount_dollars = claim["escrow_amount_cents"] / 100
+                    response = f"Thank you, {claim['first_name']}. Your identity has been verified. Your escrow account shows a balance of ${amount_dollars:,.2f}. " + self._get_main_menu()
+                else:
+                    self.failed_auth_attempts += 1
+                    if self.failed_auth_attempts >= self.max_auth_attempts:
+                        response = "For security purposes, your claim has been temporarily locked due to multiple incorrect PIN attempts. Please contact our claims department. Goodbye."
+                    else:
+                        response = f"Incorrect PIN. You have {self.max_auth_attempts - self.failed_auth_attempts} attempts remaining. Please enter your 4-digit PIN."
+            else:
+                response = "Invalid entry. Please enter your 4-digit security PIN."
+        
         # Main Menu Navigation
         elif self.current_state == MenuState.MAIN_MENU:
-            if input_value == "1":  # Account Services
+            if input_value == "1":  # Claim Status
                 if not self.authenticated:
-                    self.current_state = MenuState.AUTHENTICATION
-                    self.awaiting_pin = False
-                    response = "To access your account information, please enter your 4-digit account number."
+                    self.current_state = MenuState.ENTER_CLAIM_CODE
+                    response = "To access your claim information, please enter your 6-digit claim code."
                 else:
-                    self.current_state = MenuState.ACCOUNT_SERVICES
-                    response = self._get_account_services_menu()
-            elif input_value == "2":  # Card Services
-                self.current_state = MenuState.CARD_SERVICES
-                response = self._get_card_services_menu()
-            elif input_value == "3":  # Loans
-                self.current_state = MenuState.LOAN_SERVICES
-                response = """Loans and Mortgages Menu.
-                    For personal loan information, press 1.
-                    For mortgage rates, press 2.
-                    For auto loans, press 3.
-                    To return to the main menu, press 9."""
-            elif input_value == "4":  # Transfers
+                    self.current_state = MenuState.CLAIM_STATUS
+                    response = self._get_claim_status_menu()
+            elif input_value == "2":  # Disbursement
                 if not self.authenticated:
-                    self.current_state = MenuState.AUTHENTICATION
-                    self.awaiting_pin = False
-                    response = "To make a transfer, please enter your 4-digit account number."
+                    self.current_state = MenuState.ENTER_CLAIM_CODE
+                    response = "To access disbursement options, please enter your 6-digit claim code."
                 else:
-                    self.current_state = MenuState.TRANSFERS
-                    response = self._get_transfers_menu()
-            elif input_value == "5":  # Bill Pay
+                    self.current_state = MenuState.DISBURSEMENT
+                    response = self._get_disbursement_menu()
+            elif input_value == "3":  # Update Info
                 if not self.authenticated:
-                    self.current_state = MenuState.AUTHENTICATION
-                    self.awaiting_pin = False
-                    response = "To access Bill Pay, please enter your 4-digit account number."
+                    self.current_state = MenuState.ENTER_CLAIM_CODE
+                    response = "To update your information, please enter your 6-digit claim code."
                 else:
-                    self.current_state = MenuState.BILL_PAY
-                    response = """Bill Pay Menu.
-                        To pay a bill now, press 1.
-                        To schedule a payment, press 2.
-                        To view scheduled payments, press 3.
-                        To return to the main menu, press 9."""
-            elif input_value == "0":  # Customer Service
-                response = await self._handle_transfer_to_representative()
+                    self.current_state = MenuState.UPDATE_INFO
+                    response = self._get_update_info_menu()
+            elif input_value == "0":  # Claims Specialist
+                response = await self._handle_transfer_to_specialist()
             else:
                 response = "Invalid selection. " + self._get_main_menu()
         
-        # Account Services Sub-Menu
-        elif self.current_state == MenuState.ACCOUNT_SERVICES:
-            if input_value == "1":  # Check Balance
-                response = await self._get_account_balances()
-            elif input_value == "2":  # Recent Transactions
-                response = await self._get_recent_transactions()
-            elif input_value == "3":  # Account Details
-                response = "Account details will be mailed to your address on file within 5 business days. " + self._get_account_services_menu()
+        # Claim Status Sub-Menu
+        elif self.current_state == MenuState.CLAIM_STATUS:
+            if input_value == "1":  # Escrow Balance
+                response = await self._get_escrow_balance()
+            elif input_value == "2":  # Claim Status
+                response = await self._get_claim_status()
+            elif input_value == "3":  # Claim Details
+                response = await self._get_claim_details()
             elif input_value == "9":  # Back to Main
                 self.current_state = MenuState.MAIN_MENU
                 response = self._get_main_menu()
             else:
-                response = "Invalid selection. " + self._get_account_services_menu()
+                response = "Invalid selection. " + self._get_claim_status_menu()
         
-        # Card Services Sub-Menu
-        elif self.current_state == MenuState.CARD_SERVICES:
-            if input_value == "1":  # Report Lost/Stolen
-                response = await self._handle_lost_card()
-            elif input_value == "2":  # Activate Card
-                response = "To activate your new card, please enter the last 4 digits of the card number."
-                self.current_state = MenuState.ACTIVATE_CARD
-            elif input_value == "3":  # Request Replacement
-                response = "A replacement card will be mailed to your address on file within 7 to 10 business days. " + self._get_card_services_menu()
-            elif input_value == "4":  # Change PIN
-                response = "To change your PIN, please visit any ATM or branch location. " + self._get_card_services_menu()
-            elif input_value == "9":  # Back to Main
-                self.current_state = MenuState.MAIN_MENU
-                response = self._get_main_menu()
-            else:
-                response = "Invalid selection. " + self._get_card_services_menu()
-        
-        # Transfers Sub-Menu
-        elif self.current_state == MenuState.TRANSFERS:
-            if input_value == "1":  # Between Accounts
-                response = "Transfer between accounts. Please enter the amount to transfer, followed by the pound key."
-            elif input_value == "2":  # To Another Person
-                response = "To send money to another person, please use our mobile app or online banking. " + self._get_transfers_menu()
+        # Disbursement Sub-Menu
+        elif self.current_state == MenuState.DISBURSEMENT:
+            if input_value == "1":  # Direct Deposit
+                response = "To set up direct deposit, you will need to provide your bank routing number and account number. A claims specialist will call you within 24 hours to complete this process securely. " + self._get_disbursement_menu()
+            elif input_value == "2":  # Request Check
+                if self.current_claim:
+                    response = f"A check will be mailed to your address on file: {self.current_claim['address']}, {self.current_claim['city']}, {self.current_claim['state']} {self.current_claim['zip_code']}. Please allow 7 to 10 business days for delivery. " + self._get_disbursement_menu()
+                else:
+                    response = "Unable to process. Please verify your claim first. " + self._get_disbursement_menu()
             elif input_value == "3":  # Wire Transfer
-                response = "For wire transfers, please visit a branch or call during business hours. " + self._get_transfers_menu()
+                response = "Wire transfers are available for amounts over $10,000. A claims specialist will contact you to verify wire instructions. Processing time is 3 to 5 business days. " + self._get_disbursement_menu()
+            elif input_value == "4":  # Disbursement Status
+                response = await self._get_disbursement_status()
             elif input_value == "9":  # Back to Main
                 self.current_state = MenuState.MAIN_MENU
                 response = self._get_main_menu()
             else:
-                response = "Invalid selection. " + self._get_transfers_menu()
+                response = "Invalid selection. " + self._get_disbursement_menu()
         
-        # Loan Services Sub-Menu
-        elif self.current_state == MenuState.LOAN_SERVICES:
-            if input_value == "9":  # Back to Main
+        # Update Info Sub-Menu
+        elif self.current_state == MenuState.UPDATE_INFO:
+            if input_value == "1":  # Update Address
+                response = "To update your mailing address, please press 0 to speak with a claims specialist who can verify your identity and process the change. " + self._get_update_info_menu()
+            elif input_value == "2":  # Update Phone
+                response = "To update your phone number, please press 0 to speak with a claims specialist. " + self._get_update_info_menu()
+            elif input_value == "3":  # Update Banking
+                response = "To update your banking information for direct deposit, please press 0 to speak with a claims specialist. For your security, banking changes require additional verification. " + self._get_update_info_menu()
+            elif input_value == "9":  # Back to Main
                 self.current_state = MenuState.MAIN_MENU
                 response = self._get_main_menu()
             else:
-                response = "For loan information, please visit our website or speak with a representative. Press 0 to speak with someone, or press 9 to return to the main menu."
-        
-        # Bill Pay Sub-Menu
-        elif self.current_state == MenuState.BILL_PAY:
-            if input_value == "9":  # Back to Main
-                self.current_state = MenuState.MAIN_MENU
-                response = self._get_main_menu()
-            else:
-                response = "Bill Pay feature coming soon. Press 9 to return to the main menu."
-        
-        # Authentication - Account Number Entry
-        elif self.current_state == MenuState.AUTHENTICATION and not self.awaiting_pin:
-            if len(input_value) == 4 and input_value.isdigit():
-                if input_value in MOCK_CUSTOMERS:
-                    self.customer_id = input_value
-                    self.awaiting_pin = True
-                    response = "Thank you. Now please enter your 4-digit PIN."
-                else:
-                    self.failed_auth_attempts += 1
-                    if self.failed_auth_attempts >= self.max_auth_attempts:
-                        response = "For security, access has been temporarily locked. Please try again later. Goodbye."
-                    else:
-                        response = f"Account not found. You have {self.max_auth_attempts - self.failed_auth_attempts} attempts remaining. Please enter your account number."
-            else:
-                response = "Please enter a valid 4-digit account number."
-        
-        # Authentication - PIN Entry
-        elif self.current_state == MenuState.AUTHENTICATION and self.awaiting_pin:
-            if len(input_value) == 4 and input_value.isdigit():
-                customer = MOCK_CUSTOMERS.get(self.customer_id)
-                if customer and input_value == customer["pin"]:
-                    self.authenticated = True
-                    self.current_customer = customer
-                    self.awaiting_pin = False
-                    self.failed_auth_attempts = 0
-                    self.current_state = MenuState.MAIN_MENU
-                    response = f"Thank you, {customer['name'].split()[0]}. Your identity has been verified. " + self._get_main_menu()
-                else:
-                    self.failed_auth_attempts += 1
-                    if self.failed_auth_attempts >= self.max_auth_attempts:
-                        response = "For security, access has been temporarily locked due to incorrect PIN attempts. Goodbye."
-                    else:
-                        response = f"Incorrect PIN. You have {self.max_auth_attempts - self.failed_auth_attempts} attempts remaining. Please enter your PIN."
-            else:
-                response = "Please enter a valid 4-digit PIN."
-        
-        # Card Activation
-        elif self.current_state == MenuState.ACTIVATE_CARD:
-            if len(input_value) == 4 and input_value.isdigit():
-                response = f"Your card ending in {input_value} has been activated. You may begin using it immediately. " + self._get_card_services_menu()
-                self.current_state = MenuState.CARD_SERVICES
-            else:
-                response = "Please enter the last 4 digits of your card."
+                response = "Invalid selection. " + self._get_update_info_menu()
         
         # Say the response
         if response and self.session:
             await self.session.say(response)
     
-    async def _get_account_balances(self) -> str:
-        """Get account balances for authenticated customer."""
-        if not self.authenticated or not self.current_customer:
-            return "Please authenticate first. " + self._get_main_menu()
+    async def _get_escrow_balance(self) -> str:
+        """Get escrow balance for authenticated claimant."""
+        if not self.authenticated or not self.current_claim:
+            return "Please verify your claim first. " + self._get_main_menu()
         
-        accounts = self.current_customer["accounts"]
-        response_parts = ["Here are your account balances. "]
-        
-        for acc_type, acc in accounts.items():
-            if acc_type == "credit":
-                response_parts.append(f"Your {acc['type']} ending in {acc['number'][-4:]}: current balance ${abs(acc['balance']):,.2f}, available credit ${acc['available_credit']:,.2f}. ")
-            else:
-                response_parts.append(f"Your {acc['type']} ending in {acc['number'][-4:]}: ${acc['balance']:,.2f}. ")
-        
-        response_parts.append(self._get_account_services_menu())
-        return "".join(response_parts)
+        amount_dollars = self.current_claim["escrow_amount_cents"] / 100
+        return f"Your escrow account balance is ${amount_dollars:,.2f}. This amount is held by the {self.current_claim['originating_entity']} and is pending disbursement. " + self._get_claim_status_menu()
     
-    async def _get_recent_transactions(self) -> str:
-        """Get recent transactions for authenticated customer."""
-        if not self.authenticated or not self.current_customer:
-            return "Please authenticate first. " + self._get_main_menu()
+    async def _get_claim_status(self) -> str:
+        """Get claim status for authenticated claimant."""
+        if not self.authenticated or not self.current_claim:
+            return "Please verify your claim first. " + self._get_main_menu()
         
-        transactions = self.current_customer["recent_transactions"][:5]
+        status = self.current_claim["status"]
+        status_messages = {
+            "pending": "Your claim is currently pending review. A claims specialist will contact you within 3 to 5 business days.",
+            "verified": "Your claim has been verified and is approved for disbursement. Please select disbursement options from the main menu.",
+            "processing": "Your disbursement is currently being processed. Please allow 5 to 7 business days for completion.",
+            "approved": "Your claim has been approved. Funds will be disbursed according to your selected method.",
+            "disbursed": "Your funds have been disbursed. Please check your selected payment method for receipt.",
+        }
         
-        if not transactions:
-            return "You have no recent transactions. " + self._get_account_services_menu()
-        
-        response_parts = [f"Here are your last {len(transactions)} transactions. "]
-        
-        for txn in transactions:
-            amount = txn["amount"]
-            if amount < 0:
-                response_parts.append(f"On {txn['date']}, {txn['description']}, debit of ${abs(amount):,.2f}. ")
-            else:
-                response_parts.append(f"On {txn['date']}, {txn['description']}, credit of ${amount:,.2f}. ")
-        
-        response_parts.append(self._get_account_services_menu())
-        return "".join(response_parts)
+        message = status_messages.get(status, "Your claim status is being reviewed.")
+        return f"Claim status: {status.upper()}. {message} " + self._get_claim_status_menu()
     
-    async def _handle_lost_card(self) -> str:
-        """Handle lost/stolen card report."""
-        if self.authenticated and self.current_customer:
-            cards = self.current_customer.get("cards", [])
-            if cards:
-                card = cards[0]
-                return f"Your {card['type']} card ending in {card['last_four']} has been blocked immediately. A replacement will be mailed within 5 to 7 business days. " + self._get_card_services_menu()
-        return "To report a lost or stolen card, press 0 to speak with a representative immediately."
+    async def _get_claim_details(self) -> str:
+        """Get detailed claim information."""
+        if not self.authenticated or not self.current_claim:
+            return "Please verify your claim first. " + self._get_main_menu()
+        
+        claim = self.current_claim
+        amount_dollars = claim["escrow_amount_cents"] / 100
+        
+        return f"""Here are your claim details.
+            Claim code ending in {claim['claim_code'][-4:]}.
+            Claimant name: {claim['first_name']} {claim['last_name']}.
+            Escrow type: {claim['escrow_type']}.
+            Originating entity: {claim['originating_entity']}.
+            Escrow amount: ${amount_dollars:,.2f}.
+            Current status: {claim['status']}.
+            Address on file: {claim['city']}, {claim['state']}.
+            """ + self._get_claim_status_menu()
     
-    async def _handle_transfer_to_representative(self) -> str:
-        """Handle transfer to customer service."""
-        return """Please hold while I connect you to a customer service representative.
-            Your estimated wait time is approximately 3 minutes.
+    async def _get_disbursement_status(self) -> str:
+        """Get disbursement status."""
+        if not self.authenticated or not self.current_claim:
+            return "Please verify your claim first. " + self._get_main_menu()
+        
+        claim = self.current_claim
+        if claim["disbursement_method"]:
+            method = claim["disbursement_method"].replace("_", " ").title()
+            return f"Your selected disbursement method is {method}. Your funds are scheduled for release within 5 to 7 business days. " + self._get_disbursement_menu()
+        else:
+            return "You have not yet selected a disbursement method. Please choose from the disbursement options to receive your funds. " + self._get_disbursement_menu()
+    
+    async def _handle_transfer_to_specialist(self) -> str:
+        """Handle transfer to claims specialist."""
+        return """Please hold while I connect you to a Federal Reserve claims specialist.
+            Your estimated wait time is approximately 5 minutes.
+            For your security, please have your claim code and identification ready.
             Your call is important to us. Please stay on the line."""
     
     @function_tool
@@ -524,66 +518,48 @@ Authenticated: {self.authenticated}
         """
         if language.lower() in ["1", "english", "one"]:
             self.language = "english"
-            self.current_state = MenuState.MAIN_MENU
-            return f"You've selected English. Welcome to {BANK_NAME}. " + self._get_main_menu()
+            self.current_state = MenuState.ENTER_CLAIM_CODE
+            return f"You've selected English. Welcome to the {BANK_NAME} claims verification system. To access your escrow account, please enter your 6-digit claim code."
         elif language.lower() in ["2", "spanish", "español", "espanol", "two"]:
             self.language = "spanish"
-            self.current_state = MenuState.MAIN_MENU
-            return f"Ha seleccionado Español. Bienvenido a {BANK_NAME}. Por favor, continúe en inglés por ahora ya que el soporte completo en español estará disponible pronto. " + self._get_main_menu()
+            self.current_state = MenuState.ENTER_CLAIM_CODE
+            return f"Ha seleccionado Español. Bienvenido al sistema de verificación de {BANK_NAME}. Por favor ingrese su código de reclamo de 6 dígitos."
         else:
             return self._get_welcome_message()
     
     @function_tool
     async def navigate_main_menu(self, context: RunContext, choice: str) -> str:
         """
-        Navigate the main menu based on customer's choice.
+        Navigate the main menu based on claimant's choice.
         
         Args:
-            choice: Menu selection (1-5, 0, or *)
+            choice: Menu selection (1-3, 0, or *)
         """
         choice = choice.strip().lower()
         
-        if choice in ["1", "one", "account", "accounts", "account services"]:
+        if choice in ["1", "one", "status", "claim status", "check status"]:
             if not self.authenticated:
-                self.current_state = MenuState.AUTHENTICATION
-                return "To access your account information, I'll need to verify your identity. Please enter your 4-digit account number, followed by the pound key."
-            self.current_state = MenuState.ACCOUNT_SERVICES
-            return self._get_account_services_menu()
+                self.current_state = MenuState.ENTER_CLAIM_CODE
+                return "To access your claim information, please enter your 6-digit claim code."
+            self.current_state = MenuState.CLAIM_STATUS
+            return self._get_claim_status_menu()
         
-        elif choice in ["2", "two", "card", "cards", "card services"]:
-            self.current_state = MenuState.CARD_SERVICES
-            return self._get_card_services_menu()
-        
-        elif choice in ["3", "three", "loan", "loans", "mortgage"]:
-            self.current_state = MenuState.LOAN_SERVICES
-            return """Loans and Mortgages.
-            For information about personal loans, press 1.
-            For mortgage rates and applications, press 2.
-            For auto loans, press 3.
-            To check your existing loan balance, press 4.
-            To return to the main menu, press 9."""
-        
-        elif choice in ["4", "four", "transfer", "transfers", "payment", "payments"]:
+        elif choice in ["2", "two", "disbursement", "payment", "receive funds"]:
             if not self.authenticated:
-                self.current_state = MenuState.AUTHENTICATION
-                return "To make a transfer, I'll need to verify your identity first. Please enter your 4-digit account number, followed by the pound key."
-            self.current_state = MenuState.TRANSFERS
-            return self._get_transfers_menu()
+                self.current_state = MenuState.ENTER_CLAIM_CODE
+                return "To access disbursement options, please enter your 6-digit claim code."
+            self.current_state = MenuState.DISBURSEMENT
+            return self._get_disbursement_menu()
         
-        elif choice in ["5", "five", "bill", "bill pay", "bills"]:
+        elif choice in ["3", "three", "update", "update info", "change information"]:
             if not self.authenticated:
-                self.current_state = MenuState.AUTHENTICATION
-                return "To access Bill Pay, I'll need to verify your identity. Please enter your 4-digit account number, followed by the pound key."
-            self.current_state = MenuState.BILL_PAY
-            return """Bill Pay Services.
-            To pay a bill now, press 1.
-            To schedule a future payment, press 2.
-            To view scheduled payments, press 3.
-            To add a new payee, press 4.
-            To return to the main menu, press 9."""
+                self.current_state = MenuState.ENTER_CLAIM_CODE
+                return "To update your information, please enter your 6-digit claim code."
+            self.current_state = MenuState.UPDATE_INFO
+            return self._get_update_info_menu()
         
-        elif choice in ["0", "zero", "representative", "agent", "human", "customer service", "speak to someone"]:
-            return await self.transfer_to_representative(context)
+        elif choice in ["0", "zero", "representative", "agent", "human", "specialist", "speak to someone"]:
+            return await self._handle_transfer_to_specialist()
         
         elif choice in ["*", "star", "repeat"]:
             return self._get_main_menu()
@@ -592,275 +568,147 @@ Authenticated: {self.authenticated}
             return f"I didn't understand that selection. " + self._get_main_menu()
     
     @function_tool
-    async def authenticate_customer(self, context: RunContext, account_number: str, pin: str = None) -> str:
+    async def verify_claim(self, context: RunContext, claim_code: str, pin: str = None) -> str:
         """
-        Authenticate a customer with their account number and PIN.
+        Verify a claimant with their claim code and PIN.
         
         Args:
-            account_number: The customer's 4-digit account identifier
-            pin: The customer's 4-digit PIN (if provided)
+            claim_code: The claimant's 6-digit claim code
+            pin: The claimant's 4-digit PIN (if provided)
         """
         # Clean the input
-        account_number = ''.join(filter(str.isdigit, account_number))
+        claim_code = ''.join(filter(str.isdigit, claim_code))
         
-        if len(account_number) != 4:
-            return "Please enter a valid 4-digit account number, followed by the pound key."
+        if len(claim_code) != 6:
+            return "Please enter a valid 6-digit claim code."
         
-        if account_number not in MOCK_CUSTOMERS:
+        if claim_code not in MOCK_ESCROW_CLAIMS:
             self.failed_auth_attempts += 1
             if self.failed_auth_attempts >= self.max_auth_attempts:
-                return "For your security, we've temporarily locked access to phone banking. Please visit your nearest branch or try again later. Goodbye."
-            return f"I couldn't find that account number. You have {self.max_auth_attempts - self.failed_auth_attempts} attempts remaining. Please try again."
+                return "For security purposes, this line has been temporarily locked. Please contact our claims department directly. Goodbye."
+            return f"Claim code not found in our system. You have {self.max_auth_attempts - self.failed_auth_attempts} attempts remaining. Please try again."
         
-        self.customer_id = account_number
+        self.claim_code = claim_code
         
         if pin is None:
-            return "Thank you. Now please enter your 4-digit PIN, followed by the pound key."
+            self.current_state = MenuState.ENTER_PIN
+            return "Claim code verified. Now please enter your 4-digit security PIN."
         
         # Verify PIN
         pin = ''.join(filter(str.isdigit, pin))
-        customer = MOCK_CUSTOMERS[account_number]
+        claim = MOCK_ESCROW_CLAIMS[claim_code]
         
-        if pin != customer["pin"]:
+        if pin != claim["pin"]:
             self.failed_auth_attempts += 1
             if self.failed_auth_attempts >= self.max_auth_attempts:
-                return "For your security, we've temporarily locked access to phone banking due to multiple incorrect PIN attempts. Please visit your nearest branch or call back later. Goodbye."
-            return f"That PIN is incorrect. You have {self.max_auth_attempts - self.failed_auth_attempts} attempts remaining. Please enter your PIN again."
+                return "For security purposes, your claim has been temporarily locked due to multiple incorrect PIN attempts. Please contact our claims department. Goodbye."
+            return f"Incorrect PIN. You have {self.max_auth_attempts - self.failed_auth_attempts} attempts remaining. Please enter your PIN again."
         
         # Authentication successful
         self.authenticated = True
-        self.current_customer = customer
+        self.current_claim = claim
         self.failed_auth_attempts = 0
         self.current_state = MenuState.MAIN_MENU
         
-        return f"Thank you, {customer['name'].split()[0]}. Your identity has been verified. " + self._get_main_menu()
+        amount_dollars = claim["escrow_amount_cents"] / 100
+        return f"Thank you, {claim['first_name']}. Your identity has been verified. Your escrow account shows a balance of ${amount_dollars:,.2f}. " + self._get_main_menu()
     
     @function_tool
     async def verify_pin(self, context: RunContext, pin: str) -> str:
         """
-        Verify the customer's PIN after account number was provided.
+        Verify the claimant's PIN after claim code was provided.
         
         Args:
-            pin: The customer's 4-digit PIN
+            pin: The claimant's 4-digit PIN
         """
-        if not self.customer_id:
-            return "Please enter your 4-digit account number first."
+        if not self.claim_code:
+            return "Please enter your 6-digit claim code first."
         
-        return await self.authenticate_customer(context, self.customer_id, pin)
+        return await self.verify_claim(context, self.claim_code, pin)
     
     @function_tool
-    async def check_account_balance(self, context: RunContext, account_type: str = "all") -> str:
+    async def check_escrow_balance(self, context: RunContext) -> str:
         """
-        Check account balance for authenticated customer.
-        
-        Args:
-            account_type: Type of account - "checking", "savings", "credit", or "all"
+        Check escrow balance for authenticated claimant.
         """
-        if not self.authenticated or not self.current_customer:
-            self.current_state = MenuState.AUTHENTICATION
-            return "To check your balance, I'll need to verify your identity. Please enter your 4-digit account number."
+        if not self.authenticated or not self.current_claim:
+            self.current_state = MenuState.ENTER_CLAIM_CODE
+            return "To check your balance, please enter your 6-digit claim code."
         
-        accounts = self.current_customer["accounts"]
-        account_type = account_type.lower().strip()
-        
-        if account_type in ["1", "one", "checking"]:
-            if "checking" in accounts:
-                acc = accounts["checking"]
-                balance = f"${acc['balance']:,.2f}"
-                return f"Your checking account ending in {acc['number'][-4:]} has an available balance of {balance}. " + self._get_account_services_menu()
-            return "You don't have a checking account on file. " + self._get_account_services_menu()
-        
-        elif account_type in ["2", "two", "savings"]:
-            if "savings" in accounts:
-                acc = accounts["savings"]
-                balance = f"${acc['balance']:,.2f}"
-                return f"Your savings account ending in {acc['number'][-4:]} has a balance of {balance}. " + self._get_account_services_menu()
-            return "You don't have a savings account on file. " + self._get_account_services_menu()
-        
-        elif account_type in ["3", "three", "credit", "credit card"]:
-            if "credit" in accounts:
-                acc = accounts["credit"]
-                balance = f"${abs(acc['balance']):,.2f}"
-                available = f"${acc['available_credit']:,.2f}"
-                return f"Your credit card ending in {acc['number'][-4:]} has a current balance of {balance} and available credit of {available}. " + self._get_account_services_menu()
-            return "You don't have a credit card on file. " + self._get_account_services_menu()
-        
-        else:
-            # Read all balances
-            response_parts = ["Here are your account balances. "]
-            for acc_type, acc in accounts.items():
-                if acc_type == "credit":
-                    response_parts.append(f"Your {acc['type']} ending in {acc['number'][-4:]}: current balance ${abs(acc['balance']):,.2f}, available credit ${acc['available_credit']:,.2f}. ")
-                else:
-                    response_parts.append(f"Your {acc['type']} ending in {acc['number'][-4:]}: ${acc['balance']:,.2f}. ")
-            
-            response_parts.append(self._get_account_services_menu())
-            return "".join(response_parts)
+        return await self._get_escrow_balance()
     
     @function_tool
-    async def get_recent_transactions(self, context: RunContext, count: int = 5) -> str:
+    async def check_claim_status(self, context: RunContext) -> str:
         """
-        Get recent transactions for authenticated customer.
+        Check claim status for authenticated claimant.
+        """
+        if not self.authenticated or not self.current_claim:
+            self.current_state = MenuState.ENTER_CLAIM_CODE
+            return "To check your claim status, please enter your 6-digit claim code."
+        
+        return await self._get_claim_status()
+    
+    @function_tool
+    async def get_claim_details(self, context: RunContext) -> str:
+        """
+        Get detailed claim information for authenticated claimant.
+        """
+        if not self.authenticated or not self.current_claim:
+            self.current_state = MenuState.ENTER_CLAIM_CODE
+            return "To view your claim details, please enter your 6-digit claim code."
+        
+        return await self._get_claim_details()
+    
+    @function_tool
+    async def request_disbursement(self, context: RunContext, method: str = None) -> str:
+        """
+        Request disbursement of escrow funds.
         
         Args:
-            count: Number of transactions to retrieve (default 5)
+            method: Disbursement method - "direct_deposit", "check", or "wire"
         """
-        if not self.authenticated or not self.current_customer:
-            self.current_state = MenuState.AUTHENTICATION
-            return "To view your transactions, I'll need to verify your identity. Please enter your 4-digit account number."
+        if not self.authenticated or not self.current_claim:
+            self.current_state = MenuState.ENTER_CLAIM_CODE
+            return "To request disbursement, please enter your 6-digit claim code."
         
-        transactions = self.current_customer["recent_transactions"][:count]
+        if not method:
+            return self._get_disbursement_menu()
         
-        if not transactions:
-            return "You have no recent transactions. " + self._get_account_services_menu()
+        method = method.lower().strip()
+        amount_dollars = self.current_claim["escrow_amount_cents"] / 100
         
-        response_parts = [f"Here are your last {len(transactions)} transactions. "]
+        if method in ["1", "direct_deposit", "direct deposit", "bank"]:
+            return f"""To set up direct deposit for your escrow amount of ${amount_dollars:,.2f}, 
+            a claims specialist will contact you within 24 hours to securely collect your banking information.
+            Direct deposit typically processes within 3 to 5 business days after verification.
+            """ + self._get_disbursement_menu()
         
-        for txn in transactions:
-            amount = txn["amount"]
-            if amount < 0:
-                response_parts.append(f"On {txn['date']}, {txn['description']}, debit of ${abs(amount):,.2f}. ")
+        elif method in ["2", "check"]:
+            address = f"{self.current_claim['address']}, {self.current_claim['city']}, {self.current_claim['state']} {self.current_claim['zip_code']}"
+            return f"""A check for ${amount_dollars:,.2f} will be mailed to your address on file: {address}.
+            Please allow 7 to 10 business days for delivery.
+            To update your mailing address before we send the check, press 0 to speak with a specialist.
+            """ + self._get_disbursement_menu()
+        
+        elif method in ["3", "wire", "wire transfer"]:
+            if amount_dollars >= 10000:
+                return f"""Wire transfer is available for your escrow amount of ${amount_dollars:,.2f}.
+                A claims specialist will contact you within 48 hours to verify wire instructions.
+                Wire transfers typically process within 3 to 5 business days.
+                A wire transfer fee of $25 will be deducted from your disbursement.
+                """ + self._get_disbursement_menu()
             else:
-                response_parts.append(f"On {txn['date']}, {txn['description']}, credit of ${amount:,.2f}. ")
+                return f"Wire transfers are only available for amounts over $10,000. Your escrow balance is ${amount_dollars:,.2f}. Please select direct deposit or check instead. " + self._get_disbursement_menu()
         
-        response_parts.append("To hear these again, press 2. " + self._get_account_services_menu())
-        return "".join(response_parts)
-    
-    @function_tool
-    async def report_lost_stolen_card(self, context: RunContext, card_type: str = None) -> str:
-        """
-        Report a lost or stolen card and block it immediately.
-        
-        Args:
-            card_type: Type of card - "debit" or "credit"
-        """
-        logger.info(f"Lost/stolen card report initiated. Card type: {card_type}")
-        
-        if not self.authenticated:
-            # For security, allow reporting without full auth but require some verification
-            return """I understand you need to report a lost or stolen card. This is urgent, so let me help you right away.
-            For your security, please enter the last 4 digits of the card you're reporting, followed by the pound key.
-            If you don't know the card number, press 0 to speak with a representative immediately."""
-        
-        cards = self.current_customer.get("cards", [])
-        
-        if card_type:
-            card_type = card_type.lower()
-            matching_cards = [c for c in cards if c["type"].lower() == card_type]
-            if matching_cards:
-                card = matching_cards[0]
-                return f"""I've immediately blocked your {card['type']} card ending in {card['last_four']}. 
-                No further transactions will be processed on this card.
-                A replacement card will be mailed to your address on file within 5 to 7 business days.
-                For expedited delivery within 2 business days, press 1.
-                To update your mailing address, press 2.
-                To return to the main menu, press 9."""
-        
-        return """Which card would you like to report?
-        For your debit card, press 1.
-        For your credit card, press 2.
-        To report all cards, press 3.
-        To speak with a representative, press 0."""
-    
-    @function_tool
-    async def activate_new_card(self, context: RunContext, last_four_digits: str = None) -> str:
-        """
-        Activate a new card.
-        
-        Args:
-            last_four_digits: Last 4 digits of the card to activate
-        """
-        if not self.authenticated:
-            self.current_state = MenuState.AUTHENTICATION
-            return "To activate your card, I'll need to verify your identity. Please enter your 4-digit account number."
-        
-        if not last_four_digits:
-            return "Please enter the last 4 digits of the card you wish to activate, followed by the pound key."
-        
-        last_four = ''.join(filter(str.isdigit, last_four_digits))
-        
-        if len(last_four) != 4:
-            return "Please enter exactly 4 digits. Enter the last 4 digits of your new card."
-        
-        # Simulate card activation
-        return f"""Your card ending in {last_four} has been successfully activated.
-        You may begin using your card immediately for purchases and ATM withdrawals.
-        For your security, please sign the back of your card.
-        Would you like to set up a custom PIN? Press 1 for yes, or press 9 to return to the main menu."""
-    
-    @function_tool
-    async def transfer_between_accounts(self, context: RunContext, from_account: str = None, to_account: str = None, amount: str = None) -> str:
-        """
-        Transfer money between customer's own accounts.
-        
-        Args:
-            from_account: Source account type (checking/savings)
-            to_account: Destination account type (checking/savings)
-            amount: Amount to transfer
-        """
-        if not self.authenticated:
-            self.current_state = MenuState.AUTHENTICATION
-            return "To make a transfer, I'll need to verify your identity. Please enter your 4-digit account number."
-        
-        if not from_account:
-            return """Which account would you like to transfer from?
-            For checking, press 1.
-            For savings, press 2."""
-        
-        if not to_account:
-            return """Which account would you like to transfer to?
-            For checking, press 1.
-            For savings, press 2."""
-        
-        if not amount:
-            return "Please enter the amount you'd like to transfer, followed by the pound key. For example, for fifty dollars, enter 5 0."
-        
-        # Parse amount
-        try:
-            transfer_amount = float(''.join(c for c in amount if c.isdigit() or c == '.'))
-        except:
-            return "I didn't understand that amount. Please enter the dollar amount using your keypad."
-        
-        # Validate accounts
-        accounts = self.current_customer["accounts"]
-        from_acc_type = "checking" if from_account in ["1", "checking"] else "savings"
-        to_acc_type = "checking" if to_account in ["1", "checking"] else "savings"
-        
-        if from_acc_type not in accounts:
-            return f"You don't have a {from_acc_type} account. " + self._get_transfers_menu()
-        
-        if to_acc_type not in accounts:
-            return f"You don't have a {to_acc_type} account. " + self._get_transfers_menu()
-        
-        if from_acc_type == to_acc_type:
-            return "You cannot transfer to the same account. Please select a different destination account."
-        
-        source_balance = accounts[from_acc_type]["balance"]
-        if transfer_amount > source_balance:
-            return f"Insufficient funds. Your {from_acc_type} account has ${source_balance:,.2f} available. Please enter a smaller amount."
-        
-        # Confirm transfer
-        return f"""You are transferring ${transfer_amount:,.2f} from your {from_acc_type} account to your {to_acc_type} account.
-        To confirm this transfer, press 1.
-        To cancel, press 2.
-        To change the amount, press 3."""
-    
-    @function_tool
-    async def confirm_transfer(self, context: RunContext, confirmed: bool = True) -> str:
-        """
-        Confirm or cancel a pending transfer.
-        
-        Args:
-            confirmed: Whether the transfer is confirmed
-        """
-        if confirmed:
-            confirmation_number = f"TRF{random.randint(100000, 999999)}"
-            return f"""Your transfer has been completed successfully.
-            Your confirmation number is {confirmation_number}.
-            The funds are now available in your destination account.
-            Is there anything else I can help you with? Press 9 for the main menu, or press 0 to speak with a representative."""
         else:
-            return "Your transfer has been cancelled. " + self._get_transfers_menu()
+            return "Invalid selection. " + self._get_disbursement_menu()
+    
+    @function_tool
+    async def transfer_to_specialist(self, context: RunContext) -> str:
+        """
+        Transfer the call to a claims specialist.
+        """
+        return await self._handle_transfer_to_specialist()
     
     @function_tool
     async def transfer_to_representative(self, context: RunContext, department: str = "general") -> str:
@@ -921,24 +769,24 @@ Authenticated: {self.authenticated}
             return self._get_welcome_message()
         elif self.current_state == MenuState.MAIN_MENU:
             return self._get_main_menu()
-        elif self.current_state == MenuState.ACCOUNT_SERVICES:
-            return self._get_account_services_menu()
-        elif self.current_state == MenuState.CARD_SERVICES:
-            return self._get_card_services_menu()
-        elif self.current_state == MenuState.TRANSFERS:
-            return self._get_transfers_menu()
+        elif self.current_state == MenuState.CLAIM_STATUS:
+            return self._get_claim_status_menu()
+        elif self.current_state == MenuState.DISBURSEMENT:
+            return self._get_disbursement_menu()
+        elif self.current_state == MenuState.UPDATE_INFO:
+            return self._get_update_info_menu()
         else:
             return self._get_main_menu()
     
     @function_tool
     async def end_call(self, context: RunContext) -> str:
         """End the call gracefully."""
-        customer_name = ""
-        if self.current_customer:
-            customer_name = f", {self.current_customer['name'].split()[0]}"
+        claimant_name = ""
+        if self.current_claim:
+            claimant_name = f", {self.current_claim['first_name']}"
         
-        return f"""Thank you for calling {BANK_NAME}{customer_name}. 
-        For 24/7 access to your accounts, download our mobile app or visit us online.
+        return f"""Thank you for calling the {BANK_NAME}{claimant_name}. 
+        For questions about your escrow claim, you may call back anytime or visit our website.
         Have a great day. Goodbye."""
 
 

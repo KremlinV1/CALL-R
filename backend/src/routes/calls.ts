@@ -597,13 +597,36 @@ router.post('/outbound', async (req: AuthRequest, res: Response) => {
             callId: newCall.id,
             agentId,
             direction: 'outbound',
+            agent_name: agent.name,
+            voice_id: agent.voiceId,
+            system_prompt: agent.systemPrompt,
+            opening_message: (agent.voiceSettings as any)?.openingMessage || `Hello, this is ${agent.name}. How can I help you today?`,
+            temperature: (agent.llmSettings as any)?.temperature || 0.7,
+            variables: {},
           }),
         });
-        console.log('✅ Room created');
+        console.log('✅ Room created with agent config:', agent.name);
         
         await db.update(calls)
           .set({ status: 'ringing', startedAt: new Date() })
           .where(eq(calls.id, newCall.id));
+        
+        // Wait for agent to join the room before placing SIP call
+        console.log('⏳ Waiting for agent to join room...');
+        let agentJoined = false;
+        for (let i = 0; i < 20; i++) {  // Wait up to 20 seconds
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          const participants = await roomService.listParticipants(roomName);
+          if (participants.some(p => p.identity.startsWith('agent-'))) {
+            agentJoined = true;
+            console.log('✅ Agent joined room');
+            break;
+          }
+        }
+        
+        if (!agentJoined) {
+          console.log('⚠️ Agent did not join in time, proceeding anyway');
+        }
         
         console.log('📞 Creating SIP participant:', {
           trunkId: LIVEKIT_SIP_TRUNK_OUTBOUND,
@@ -618,6 +641,8 @@ router.post('/outbound', async (req: AuthRequest, res: Response) => {
           {
             participantIdentity: formattedToNumber,
             participantName: 'Customer',
+            playRingtone: true,
+            ringingTimeout: 60,  // Wait up to 60 seconds for answer
           }
         );
         console.log('✅ SIP participant created:', sipResult);

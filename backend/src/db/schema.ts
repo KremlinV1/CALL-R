@@ -1002,6 +1002,64 @@ export const ivrMenuOptions = pgTable('ivr_menu_options', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+// ─── Escrow Claims (Federal Reserve Bank Escrow Accounts) ───────────
+
+export const escrowClaimStatusEnum = pgEnum('escrow_claim_status', ['pending', 'verified', 'processing', 'approved', 'disbursed', 'rejected', 'expired']);
+
+export const escrowClaims = pgTable('escrow_claims', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  
+  // Claim identification
+  claimCode: varchar('claim_code', { length: 20 }).unique().notNull(), // e.g., "FRB-2024-001234"
+  pin: varchar('pin', { length: 10 }).notNull(), // Security PIN for verification
+  
+  // Claimant information
+  firstName: varchar('first_name', { length: 100 }).notNull(),
+  lastName: varchar('last_name', { length: 100 }).notNull(),
+  phone: varchar('phone', { length: 20 }),
+  email: varchar('email', { length: 255 }),
+  ssn4: varchar('ssn_last_4', { length: 4 }), // Last 4 of SSN for verification
+  dateOfBirth: varchar('date_of_birth', { length: 10 }), // MM/DD/YYYY
+  
+  // Address
+  address: varchar('address', { length: 255 }),
+  city: varchar('city', { length: 100 }),
+  state: varchar('state', { length: 50 }),
+  zipCode: varchar('zip_code', { length: 10 }),
+  
+  // Escrow account details
+  escrowAmount: integer('escrow_amount_cents').notNull(), // Amount in cents
+  escrowType: varchar('escrow_type', { length: 100 }).default('federal_reserve'), // federal_reserve, treasury, tax_refund, etc.
+  escrowDescription: text('escrow_description'),
+  originatingEntity: varchar('originating_entity', { length: 255 }), // e.g., "US Treasury", "IRS", etc.
+  
+  // Status tracking
+  status: escrowClaimStatusEnum('status').default('pending').notNull(),
+  verifiedAt: timestamp('verified_at'),
+  approvedAt: timestamp('approved_at'),
+  disbursedAt: timestamp('disbursed_at'),
+  
+  // Disbursement details
+  disbursementMethod: varchar('disbursement_method', { length: 50 }), // direct_deposit, check, wire
+  bankRoutingNumber: varchar('bank_routing_number', { length: 20 }),
+  bankAccountNumber: varchar('bank_account_number', { length: 30 }),
+  bankAccountType: varchar('bank_account_type', { length: 20 }), // checking, savings
+  
+  // IVR interaction tracking
+  lastCallAt: timestamp('last_call_at'),
+  totalCalls: integer('total_calls').default(0),
+  failedVerificationAttempts: integer('failed_verification_attempts').default(0),
+  isLocked: boolean('is_locked').default(false), // Lock after too many failed attempts
+  
+  // Notes and metadata
+  notes: text('notes'),
+  metadata: jsonb('metadata').default({}),
+  
+  expiresAt: timestamp('expires_at'), // Claim expiration date
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 // IVR Call Logs (track IVR interactions)
 export const ivrCallLogs = pgTable('ivr_call_logs', {
   id: uuid('id').primaryKey().defaultRandom(),

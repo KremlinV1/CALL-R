@@ -29,6 +29,7 @@
     "express": "^4.21.2",
     "helmet": "^8.0.0",
     "jose": "^5.9.6",
+    "jsonwebtoken": "^9.0.3",
     "livekit-server-sdk": "^2.15.0",
     "morgan": "^1.10.0",
     "openai": "^6.27.0",

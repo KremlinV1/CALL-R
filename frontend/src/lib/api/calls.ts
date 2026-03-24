@@ -67,7 +67,7 @@ export const callsApi = {
   },
 
   initiateOutbound: async (params: { agentId: string; toNumber: string; contactId?: string }): Promise<{ call: Call }> => {
-    const { data } = await apiClient.post<{ call: Call }>('/calls/outbound', params);
+    const { data } = await apiClient.post<{ call: Call }>('/calls/outbound', { ...params, provider: 'livekit' });
     return data;
   },
 

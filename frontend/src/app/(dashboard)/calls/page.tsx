@@ -199,7 +199,7 @@ export default function CallsPage() {
     mutationFn: async (data: { agentId: string; toNumber: string; fromNumberId?: string }) => {
       const response = await axios.post(
         `${API_URL}/calls/outbound`,
-        data,
+        { ...data, provider: 'livekit' },  // Use LiveKit SIP for outbound calls
         { headers: { Authorization: `Bearer ${token}` } }
       )
       return response.data

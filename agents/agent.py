@@ -182,7 +182,7 @@ class PONELineAgent(Agent):
         super().__init__(
             instructions=self.config.system_prompt,
             stt=stt,
-            llm=openai.LLM(model="gpt-4o-mini"),
+            llm=openai.LLM(model="gpt-4o"),  # Using GPT-4o for smoother, faster responses
             tts=tts,
             vad=silero.VAD.load(),
         )
@@ -193,10 +193,12 @@ class PONELineAgent(Agent):
         self.participant_identity = participant_identity
     
     async def on_enter(self):
-        """Called when the agent starts."""
-        # Say the opening message
-        opening = self.config.interpolate_variables(self.config.opening_message)
-        await self.session.say(opening)
+        """Called when the agent starts.
+        
+        Note: Opening message is handled in entrypoint() after waiting for audio subscription.
+        This ensures the caller can hear the agent when the call connects.
+        """
+        pass
     
     @function_tool
     async def transfer_call(self, department: str = "support") -> str:
@@ -375,24 +377,28 @@ async def entrypoint(ctx: JobContext):
     # Track conversation for transcript
     conversation_history = []
     
+    # Connect to the room first to get metadata
+    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+    
     # Get agent configuration from room metadata or use defaults
     config = AgentConfig()
     call_id = None
+    
+    logger.info(f"Room metadata: {ctx.room.metadata}")
     
     if ctx.room.metadata:
         try:
             metadata = json.loads(ctx.room.metadata)
             config = create_agent_config_from_metadata(metadata)
             call_id = metadata.get("callId")
-            logger.info(f"Loaded agent config: {config.name}, callId: {call_id}")
+            logger.info(f"Loaded agent config: {config.name}, opening: {config.opening_message[:50] if config.opening_message else 'none'}...")
         except Exception as e:
             logger.warning(f"Failed to parse room metadata: {e}, using defaults")
+    else:
+        logger.warning("No room metadata found, using default config")
     
     # Notify backend that call is in-progress
     await send_call_status(ctx.room.name, status="in-progress")
-    
-    # Connect to the room
-    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
     
     # Get participant identity for SIP transfers
     # Wait for a remote participant (the caller) to join
@@ -436,6 +442,25 @@ async def entrypoint(ctx: JobContext):
     await session.start(agent=agent, room=ctx.room)
     
     logger.info("Agent is now active and listening")
+    
+    # Wait for audio output to be subscribed before saying opening message
+    # This ensures the caller can actually hear the agent
+    if session._room_io and session._room_io.subscribed_fut:
+        logger.info("Waiting for audio subscription...")
+        try:
+            await asyncio.wait_for(session._room_io.subscribed_fut, timeout=10.0)
+            logger.info("Audio subscription ready")
+        except asyncio.TimeoutError:
+            logger.warning("Timeout waiting for audio subscription, proceeding anyway")
+    
+    # Small delay to ensure audio pipeline is fully ready
+    await asyncio.sleep(0.5)
+    
+    # Say opening message now that audio is ready
+    opening = config.interpolate_variables(config.opening_message)
+    if opening:
+        logger.info(f"Saying opening message: {opening[:50]}...")
+        await session.say(opening)
     
     # Cleanup callback when session ends
     async def on_session_end():
