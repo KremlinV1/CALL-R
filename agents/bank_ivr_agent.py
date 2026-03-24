@@ -39,8 +39,8 @@ CARTESIA_API_KEY = os.getenv("CARTESIA_API_KEY", "")
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "")
 
 # Bank name configuration
-BANK_NAME = "First National Bank"
-BANK_SHORT_NAME = "FNB"
+BANK_NAME = "Federal Reserve Bank Escrow Accounts"
+BANK_SHORT_NAME = "FRBEA"
 
 
 class MenuState(Enum):
