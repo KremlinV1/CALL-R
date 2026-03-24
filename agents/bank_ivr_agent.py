@@ -138,7 +138,7 @@ class BankIVRAgent(Agent):
         self.language = "english"
         self.failed_auth_attempts = 0
         self.max_auth_attempts = 3
-        self.session = None  # Will be set when session starts
+        self._agent_session = None  # Will be set when session starts (renamed to avoid conflict with Agent.session property)
         self.dtmf_buffer = ""  # Buffer for multi-digit DTMF input
         self.awaiting_pin = False  # Flag for PIN entry mode
         self.awaiting_ssn = False  # Flag for SSN verification
@@ -247,7 +247,7 @@ Authenticated: {self.authenticated}
     
     def set_session(self, session: AgentSession):
         """Set the session reference for DTMF handling."""
-        self.session = session
+        self._agent_session = session
     
     async def handle_dtmf(self, digit: str) -> None:
         """
@@ -267,8 +267,8 @@ Authenticated: {self.authenticated}
         if digit == "*":
             self.dtmf_buffer = ""
             response = await self._get_current_menu_prompt()
-            if self.session:
-                await self.session.say(response)
+            if self._agent_session:
+                await self._agent_session.say(response)
             return
         
         # For single-digit menu selections, process immediately
@@ -443,8 +443,8 @@ Authenticated: {self.authenticated}
                 response = "Invalid selection. " + self._get_update_info_menu()
         
         # Say the response
-        if response and self.session:
-            await self.session.say(response)
+        if response and self._agent_session:
+            await self._agent_session.say(response)
     
     async def _get_escrow_balance(self) -> str:
         """Get escrow balance for authenticated claimant."""
