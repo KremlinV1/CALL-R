@@ -498,10 +498,29 @@ Authenticated: {self.authenticated}
     
     async def _handle_transfer_to_specialist(self) -> str:
         """Handle transfer to claims specialist."""
-        return """Please hold while I connect you to a Federal Reserve claims specialist.
-            Your estimated wait time is approximately 5 minutes.
+        transfer_message = """Please hold while I connect you to a Federal Reserve claims specialist.
             For your security, please have your claim code and identification ready.
-            Your call is important to us. Please stay on the line."""
+            Transferring you now."""
+        
+        # Perform actual SIP transfer
+        if self.room_name and self.participant_identity:
+            try:
+                transfer_to = "tel:+17542299366"  # Claims specialist line
+                
+                async with api.LiveKitAPI() as livekit_api:
+                    transfer_request = TransferSIPParticipantRequest(
+                        participant_identity=self.participant_identity,
+                        room_name=self.room_name,
+                        transfer_to=transfer_to,
+                        play_dialtone=True
+                    )
+                    await livekit_api.sip.transfer_sip_participant(transfer_request)
+                    logger.info(f"SIP transfer initiated to {transfer_to}")
+            except Exception as e:
+                logger.error(f"SIP transfer failed: {e}")
+                return transfer_message + " I'm having trouble connecting you. Please try calling back later."
+        
+        return transfer_message
     
     @function_tool
     async def select_language(self, context: RunContext, language: str) -> str:
