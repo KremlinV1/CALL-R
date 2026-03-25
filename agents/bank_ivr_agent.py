@@ -149,13 +149,8 @@ class BankIVRAgent(Agent):
         else:
             stt = openai.STT()
         
-        # Initialize TTS - use a professional female voice
-        if CARTESIA_API_KEY and CARTESIA_API_KEY != "your_cartesia_key":
-            tts = cartesia.TTS(
-                voice="a0e99841-438c-4a64-b679-ae501e7d6091",  # Professional female voice
-            )
-        else:
-            tts = openai.TTS(voice="nova")
+        # Initialize TTS - use OpenAI TTS (Cartesia credits exhausted)
+        tts = openai.TTS(voice="nova")  # Professional female voice
         
         # Escrow Claims IVR system prompt
         system_prompt = f"""You are the automated voice system for {BANK_NAME}. You are a professional, secure, and authoritative government escrow claims assistant.
