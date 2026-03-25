@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from livekit import api, rtc
-from livekit.protocol.sip import TransferSIPParticipantRequest
+from livekit.protocol.sip import TransferSIPParticipantRequest, CreateSIPParticipantRequest
 from livekit.agents import (
     Agent,
     AgentSession,
@@ -497,27 +497,31 @@ Authenticated: {self.authenticated}
             return "You have not yet selected a disbursement method. Please choose from the disbursement options to receive your funds. " + self._get_disbursement_menu()
     
     async def _handle_transfer_to_specialist(self) -> str:
-        """Handle transfer to claims specialist."""
+        """Handle transfer to claims specialist by dialing them into the room."""
         transfer_message = """Please hold while I connect you to a Federal Reserve claims specialist.
             For your security, please have your claim code and identification ready.
-            Transferring you now."""
+            Connecting you now."""
         
-        # Perform actual SIP transfer
-        if self.room_name and self.participant_identity:
+        # Dial the specialist into the current room (bridged call)
+        if self.room_name:
             try:
-                transfer_to = "tel:+17542299366"  # Claims specialist line
+                specialist_number = "+17542299366"
+                outbound_trunk_id = "ST_6k7kKQwNtC9F"  # Telnyx Outbound trunk
                 
                 async with api.LiveKitAPI() as livekit_api:
-                    transfer_request = TransferSIPParticipantRequest(
-                        participant_identity=self.participant_identity,
+                    # Create outbound SIP participant (dial specialist into room)
+                    create_request = CreateSIPParticipantRequest(
+                        sip_trunk_id=outbound_trunk_id,
+                        sip_call_to=f"sip:{specialist_number}@sip.telnyx.com",
                         room_name=self.room_name,
-                        transfer_to=transfer_to,
+                        participant_identity="specialist",
+                        participant_name="Claims Specialist",
                         play_dialtone=True
                     )
-                    await livekit_api.sip.transfer_sip_participant(transfer_request)
-                    logger.info(f"SIP transfer initiated to {transfer_to}")
+                    await livekit_api.sip.create_sip_participant(create_request)
+                    logger.info(f"Outbound call initiated to specialist: {specialist_number}")
             except Exception as e:
-                logger.error(f"SIP transfer failed: {e}")
+                logger.error(f"Outbound call to specialist failed: {e}")
                 return transfer_message + " I'm having trouble connecting you. Please try calling back later."
         
         return transfer_message
