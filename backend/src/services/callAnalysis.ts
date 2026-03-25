@@ -116,7 +116,7 @@ export async function analyzeUnprocessedCalls(): Promise<number> {
       and(
         isNull(calls.summary),
         isNotNull(calls.transcript),
-        inArray(calls.status, ['completed', 'ended'])
+        inArray(calls.status, ['completed', 'failed', 'voicemail', 'no_answer'])
       )
     )
     .limit(50);
