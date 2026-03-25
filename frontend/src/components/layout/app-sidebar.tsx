@@ -46,6 +46,7 @@ import {
   ShieldAlert,
   MessageSquare,
   Server,
+  Landmark,
 } from "lucide-react"
 import { useAuthStore } from "@/stores/auth-store"
 import { toast } from "sonner"
@@ -87,6 +88,7 @@ const navSections = [
   {
     label: "SYSTEM",
     items: [
+      { title: "Escrow Claims", href: "/escrow-claims", icon: Landmark },
       { title: "Contacts", href: "/contacts", icon: Users },
       { title: "Appointments", href: "/appointments", icon: CalendarDays },
       { title: "Subscription", href: "/subscription", icon: CreditCard },
