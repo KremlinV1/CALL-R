@@ -465,12 +465,10 @@ export default function EscrowClaimsPage() {
               icon={Landmark}
               title="No escrow claims"
               description="Create your first escrow claim to get started"
-              action={
-                <Button onClick={() => { resetForm(); setIsCreateDialogOpen(true) }}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Claim
-                </Button>
-              }
+              action={{
+                label: "Add Claim",
+                onClick: () => { resetForm(); setIsCreateDialogOpen(true) }
+              }}
             />
           ) : (
             <Table>
