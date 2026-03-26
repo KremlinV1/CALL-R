@@ -15,7 +15,7 @@ const createEscrowClaimSchema = z.object({
   lastName: z.string().min(1, 'Last name is required'),
   phone: z.string().optional(),
   email: z.string().email().optional().or(z.literal('')),
-  ssn4: z.string().length(4).optional(),
+  ssn4: z.string().length(4).optional().or(z.literal('')),
   dateOfBirth: z.string().optional(),
   address: z.string().optional(),
   city: z.string().optional(),
@@ -26,7 +26,7 @@ const createEscrowClaimSchema = z.object({
   escrowDescription: z.string().optional(),
   originatingEntity: z.string().optional(),
   status: z.enum(['pending', 'verified', 'processing', 'approved', 'disbursed', 'rejected', 'expired']).default('pending'),
-  disbursementMethod: z.enum(['direct_deposit', 'check', 'wire']).optional(),
+  disbursementMethod: z.enum(['direct_deposit', 'check', 'wire']).optional().or(z.literal('')),
   expiresAt: z.string().optional(),
   notes: z.string().optional(),
 });
