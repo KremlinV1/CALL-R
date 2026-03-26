@@ -174,7 +174,7 @@ export default function EscrowClaimsPage() {
     escrowType: "federal_reserve",
     escrowDescription: "",
     originatingEntity: "Federal Reserve Bank",
-    status: "pending" as const,
+    status: "pending" as 'pending' | 'verified' | 'processing' | 'approved' | 'disbursed' | 'rejected' | 'expired',
     disbursementMethod: "",
     expiresAt: "",
     notes: "",
