@@ -324,7 +324,7 @@ export default function EscrowClaimsPage() {
       escrowType: claim.escrowType,
       escrowDescription: claim.escrowDescription || "",
       originatingEntity: claim.originatingEntity || "",
-      status: claim.status,
+      status: claim.status as 'pending' | 'verified' | 'processing' | 'approved' | 'disbursed' | 'rejected' | 'expired',
       disbursementMethod: claim.disbursementMethod || "",
       expiresAt: claim.expiresAt ? claim.expiresAt.split("T")[0] : "",
       notes: claim.notes || "",
