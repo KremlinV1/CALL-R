@@ -94,6 +94,84 @@ app.get('/health', (req, res) => {
 // Public routes
 app.use('/api/auth', authLimiter, authRoutes);
 
+// Public IVR verification endpoint (no auth - used by IVR agent)
+import { Router } from 'express';
+import { db } from './db/index.js';
+import { escrowClaims } from './db/schema.js';
+import { eq } from 'drizzle-orm';
+
+const publicIvrRouter = Router();
+publicIvrRouter.post('/verify', async (req, res) => {
+  try {
+    const { claimCode, pin } = req.body;
+    
+    if (!claimCode || !pin) {
+      return res.status(400).json({ error: 'Claim code and PIN are required', verified: false });
+    }
+    
+    const claim = await db
+      .select()
+      .from(escrowClaims)
+      .where(eq(escrowClaims.claimCode, claimCode))
+      .limit(1);
+    
+    if (claim.length === 0) {
+      return res.status(404).json({ error: 'Claim not found', verified: false });
+    }
+    
+    const claimData = claim[0];
+    
+    if (claimData.isLocked) {
+      return res.status(403).json({ error: 'Account is locked', verified: false });
+    }
+    
+    if (claimData.pin !== pin) {
+      await db
+        .update(escrowClaims)
+        .set({
+          failedVerificationAttempts: (claimData.failedVerificationAttempts || 0) + 1,
+          isLocked: (claimData.failedVerificationAttempts || 0) >= 4,
+          updatedAt: new Date(),
+        })
+        .where(eq(escrowClaims.id, claimData.id));
+      
+      return res.status(401).json({ error: 'Invalid PIN', verified: false });
+    }
+    
+    await db
+      .update(escrowClaims)
+      .set({
+        lastCallAt: new Date(),
+        totalCalls: (claimData.totalCalls || 0) + 1,
+        failedVerificationAttempts: 0,
+        updatedAt: new Date(),
+      })
+      .where(eq(escrowClaims.id, claimData.id));
+    
+    res.json({
+      verified: true,
+      claim: {
+        id: claimData.id,
+        claimCode: claimData.claimCode,
+        firstName: claimData.firstName,
+        lastName: claimData.lastName,
+        escrowAmount: claimData.escrowAmount,
+        status: claimData.status,
+        disbursementMethod: claimData.disbursementMethod,
+        originatingEntity: claimData.originatingEntity,
+        address: claimData.address,
+        city: claimData.city,
+        state: claimData.state,
+        zipCode: claimData.zipCode,
+      },
+    });
+  } catch (error) {
+    console.error('Error verifying claim:', error);
+    res.status(500).json({ error: 'Failed to verify claim', verified: false });
+  }
+});
+app.use('/api/ivr-verify', publicIvrRouter);
+
 // Webhook routes (no auth - verified by provider signatures)
 app.use('/api/webhooks/telnyx', telnyxWebhookRoutes);
 

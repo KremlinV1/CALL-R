@@ -73,7 +73,7 @@ async def verify_claim_with_backend(claim_code: str, pin: str) -> dict:
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                f"{BACKEND_API_URL}/api/escrow-claims/verify",
+                f"{BACKEND_API_URL}/api/ivr-verify/verify",
                 json={"claimCode": claim_code, "pin": pin},
                 headers={"Content-Type": "application/json"},
                 timeout=aiohttp.ClientTimeout(total=10)
