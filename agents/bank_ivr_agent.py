@@ -7,6 +7,7 @@ import asyncio
 import json
 import os
 import random
+import aiohttp
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List
 from enum import Enum
@@ -38,6 +39,9 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 CARTESIA_API_KEY = os.getenv("CARTESIA_API_KEY", "")
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "")
 
+# Backend API URL for escrow claims verification
+BACKEND_API_URL = os.getenv("BACKEND_API_URL", "https://call-r.onrender.com")
+
 # Bank name configuration
 BANK_NAME = "Federal Reserve Bank Escrow Accounts"
 BANK_SHORT_NAME = "FRBEA"
@@ -59,67 +63,58 @@ class MenuState(Enum):
     VERIFY_SSN = "verify_ssn"
 
 
-# Simulated escrow claims database
-# Claim codes are 6 digits, PINs are 4 digits
-MOCK_ESCROW_CLAIMS = {
-    "123456": {
-        "claim_code": "123456",
-        "pin": "1234",
-        "first_name": "John",
-        "last_name": "Smith",
-        "ssn_last_4": "4521",
-        "escrow_amount_cents": 1247500,  # $12,475.00
-        "escrow_type": "Federal Reserve Unclaimed Funds",
-        "originating_entity": "U.S. Department of Treasury",
-        "status": "pending",
-        "address": "123 Main Street",
-        "city": "New York",
-        "state": "NY",
-        "zip_code": "10001",
-        "phone": "+15551234567",
-        "disbursement_method": None,
-        "bank_routing": None,
-        "bank_account": None,
-    },
-    "789012": {
-        "claim_code": "789012",
-        "pin": "5678",
-        "first_name": "Jane",
-        "last_name": "Doe",
-        "ssn_last_4": "7890",
-        "escrow_amount_cents": 8532000,  # $85,320.00
-        "escrow_type": "Federal Reserve Escrow Account",
-        "originating_entity": "Federal Reserve Bank of New York",
-        "status": "verified",
-        "address": "456 Oak Avenue",
-        "city": "Los Angeles",
-        "state": "CA",
-        "zip_code": "90001",
-        "phone": "+15559876543",
-        "disbursement_method": "direct_deposit",
-        "bank_routing": "****1234",
-        "bank_account": "****5678",
-    },
-    "456789": {
-        "claim_code": "456789",
-        "pin": "9999",
-        "first_name": "Robert",
-        "last_name": "Johnson",
-        "ssn_last_4": "1122",
-        "escrow_amount_cents": 25000000,  # $250,000.00
-        "escrow_type": "Treasury Bond Maturity",
-        "originating_entity": "U.S. Treasury Department",
-        "status": "approved",
-        "address": "789 Pine Road",
-        "city": "Chicago",
-        "state": "IL",
-        "zip_code": "60601",
-        "phone": "+15553334444",
-        "disbursement_method": "wire",
-        "bank_routing": "****9876",
-        "bank_account": "****4321",
-    },
-}
+async def verify_claim_with_backend(claim_code: str, pin: str) -> dict:
+    """
+    Verify a claim code and PIN against the backend API.
+    
+    Returns:
+        dict with 'verified' (bool), 'claim' (dict if verified), 'error' (str if failed)
+    """
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{BACKEND_API_URL}/api/escrow-claims/verify",
+                json={"claimCode": claim_code, "pin": pin},
+                headers={"Content-Type": "application/json"},
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as response:
+                data = await response.json()
+                
+                if response.status == 200 and data.get("verified"):
+                    # Transform backend response to match expected format
+                    claim_data = data.get("claim", {})
+                    return {
+                        "verified": True,
+                        "claim": {
+                            "claim_code": claim_data.get("claimCode", claim_code),
+                            "first_name": claim_data.get("firstName", ""),
+                            "last_name": claim_data.get("lastName", ""),
+                            "escrow_amount_cents": claim_data.get("escrowAmount", 0),
+                            "escrow_type": "Federal Reserve Escrow Account",
+                            "originating_entity": claim_data.get("originatingEntity", "Federal Reserve Bank"),
+                            "status": claim_data.get("status", "pending"),
+                            "address": claim_data.get("address", ""),
+                            "city": claim_data.get("city", ""),
+                            "state": claim_data.get("state", ""),
+                            "zip_code": claim_data.get("zipCode", ""),
+                            "disbursement_method": claim_data.get("disbursementMethod"),
+                        },
+                        "error": None
+                    }
+                elif response.status == 404:
+                    return {"verified": False, "claim": None, "error": "not_found"}
+                elif response.status == 401:
+                    return {"verified": False, "claim": None, "error": "invalid_pin"}
+                elif response.status == 403:
+                    return {"verified": False, "claim": None, "error": "locked"}
+                else:
+                    return {"verified": False, "claim": None, "error": data.get("error", "unknown")}
+    except asyncio.TimeoutError:
+        logger.error("Backend API timeout during claim verification")
+        return {"verified": False, "claim": None, "error": "timeout"}
+    except Exception as e:
+        logger.error(f"Backend API error during claim verification: {e}")
+        return {"verified": False, "claim": None, "error": str(e)}
 
 
 class BankIVRAgent(Agent):
@@ -329,36 +324,43 @@ Authenticated: {self.authenticated}
         # Claim Code Entry
         elif self.current_state == MenuState.ENTER_CLAIM_CODE:
             if len(input_value) == 6 and input_value.isdigit():
-                if input_value in MOCK_ESCROW_CLAIMS:
-                    self.claim_code = input_value
-                    self.current_state = MenuState.ENTER_PIN
-                    response = "Claim code verified. Now please enter your 4-digit security PIN."
-                else:
+                # Store claim code and move to PIN entry
+                self.claim_code = input_value
+                self.current_state = MenuState.ENTER_PIN
+                response = "Please enter your 4-digit security PIN."
+            else:
+                response = "Invalid entry. Please enter your 6-digit claim code."
+        
+        # PIN Entry - verify against backend API
+        elif self.current_state == MenuState.ENTER_PIN:
+            if len(input_value) == 4 and input_value.isdigit():
+                # Verify claim code and PIN against backend API
+                result = await verify_claim_with_backend(self.claim_code, input_value)
+                
+                if result["verified"]:
+                    self.authenticated = True
+                    self.current_claim = result["claim"]
+                    self.failed_auth_attempts = 0
+                    self.current_state = MenuState.MAIN_MENU
+                    amount_dollars = result["claim"]["escrow_amount_cents"] / 100
+                    response = f"Thank you, {result['claim']['first_name']}. Your identity has been verified. Your escrow account shows a balance of ${amount_dollars:,.2f}. " + self._get_main_menu()
+                elif result["error"] == "not_found":
                     self.failed_auth_attempts += 1
                     if self.failed_auth_attempts >= self.max_auth_attempts:
                         response = "For security purposes, this line has been temporarily locked due to multiple invalid attempts. Please contact our claims department directly. Goodbye."
                     else:
+                        self.current_state = MenuState.ENTER_CLAIM_CODE
                         response = f"Claim code not found in our system. You have {self.max_auth_attempts - self.failed_auth_attempts} attempts remaining. Please enter your 6-digit claim code."
-            else:
-                response = "Invalid entry. Please enter your 6-digit claim code."
-        
-        # PIN Entry
-        elif self.current_state == MenuState.ENTER_PIN:
-            if len(input_value) == 4 and input_value.isdigit():
-                claim = MOCK_ESCROW_CLAIMS.get(self.claim_code)
-                if claim and input_value == claim["pin"]:
-                    self.authenticated = True
-                    self.current_claim = claim
-                    self.failed_auth_attempts = 0
-                    self.current_state = MenuState.MAIN_MENU
-                    amount_dollars = claim["escrow_amount_cents"] / 100
-                    response = f"Thank you, {claim['first_name']}. Your identity has been verified. Your escrow account shows a balance of ${amount_dollars:,.2f}. " + self._get_main_menu()
-                else:
+                elif result["error"] == "invalid_pin":
                     self.failed_auth_attempts += 1
                     if self.failed_auth_attempts >= self.max_auth_attempts:
                         response = "For security purposes, your claim has been temporarily locked due to multiple incorrect PIN attempts. Please contact our claims department. Goodbye."
                     else:
                         response = f"Incorrect PIN. You have {self.max_auth_attempts - self.failed_auth_attempts} attempts remaining. Please enter your 4-digit PIN."
+                elif result["error"] == "locked":
+                    response = "This claim has been locked due to too many failed verification attempts. Please contact our claims department directly. Goodbye."
+                else:
+                    response = "We're experiencing technical difficulties. Please try again later or contact our claims department. Goodbye."
             else:
                 response = "Invalid entry. Please enter your 4-digit security PIN."
         
@@ -600,36 +602,37 @@ Authenticated: {self.authenticated}
         if len(claim_code) != 6:
             return "Please enter a valid 6-digit claim code."
         
-        if claim_code not in MOCK_ESCROW_CLAIMS:
-            self.failed_auth_attempts += 1
-            if self.failed_auth_attempts >= self.max_auth_attempts:
-                return "For security purposes, this line has been temporarily locked. Please contact our claims department directly. Goodbye."
-            return f"Claim code not found in our system. You have {self.max_auth_attempts - self.failed_auth_attempts} attempts remaining. Please try again."
-        
         self.claim_code = claim_code
         
         if pin is None:
             self.current_state = MenuState.ENTER_PIN
-            return "Claim code verified. Now please enter your 4-digit security PIN."
+            return "Please enter your 4-digit security PIN."
         
-        # Verify PIN
+        # Verify PIN against backend API
         pin = ''.join(filter(str.isdigit, pin))
-        claim = MOCK_ESCROW_CLAIMS[claim_code]
+        result = await verify_claim_with_backend(claim_code, pin)
         
-        if pin != claim["pin"]:
+        if result["verified"]:
+            self.authenticated = True
+            self.current_claim = result["claim"]
+            self.failed_auth_attempts = 0
+            self.current_state = MenuState.MAIN_MENU
+            amount_dollars = result["claim"]["escrow_amount_cents"] / 100
+            return f"Thank you, {result['claim']['first_name']}. Your identity has been verified. Your escrow account shows a balance of ${amount_dollars:,.2f}. " + self._get_main_menu()
+        elif result["error"] == "not_found":
+            self.failed_auth_attempts += 1
+            if self.failed_auth_attempts >= self.max_auth_attempts:
+                return "For security purposes, this line has been temporarily locked. Please contact our claims department directly. Goodbye."
+            return f"Claim code not found in our system. You have {self.max_auth_attempts - self.failed_auth_attempts} attempts remaining. Please try again."
+        elif result["error"] == "invalid_pin":
             self.failed_auth_attempts += 1
             if self.failed_auth_attempts >= self.max_auth_attempts:
                 return "For security purposes, your claim has been temporarily locked due to multiple incorrect PIN attempts. Please contact our claims department. Goodbye."
             return f"Incorrect PIN. You have {self.max_auth_attempts - self.failed_auth_attempts} attempts remaining. Please enter your PIN again."
-        
-        # Authentication successful
-        self.authenticated = True
-        self.current_claim = claim
-        self.failed_auth_attempts = 0
-        self.current_state = MenuState.MAIN_MENU
-        
-        amount_dollars = claim["escrow_amount_cents"] / 100
-        return f"Thank you, {claim['first_name']}. Your identity has been verified. Your escrow account shows a balance of ${amount_dollars:,.2f}. " + self._get_main_menu()
+        elif result["error"] == "locked":
+            return "This claim has been locked due to too many failed verification attempts. Please contact our claims department directly. Goodbye."
+        else:
+            return "We're experiencing technical difficulties. Please try again later or contact our claims department."
     
     @function_tool
     async def verify_pin(self, context: RunContext, pin: str) -> str:
