@@ -156,6 +156,7 @@ publicIvrRouter.post('/verify', async (req, res) => {
         firstName: claimData.firstName,
         lastName: claimData.lastName,
         escrowAmount: claimData.escrowAmount,
+        releaseFee: claimData.releaseFeeCents,
         escrowType: claimData.escrowType,
         escrowDescription: claimData.escrowDescription,
         status: claimData.status,

