@@ -674,6 +674,32 @@ export default function EscrowClaimsPage() {
               </div>
             </div>
 
+            {/* Identity Verification */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>SSN Last 4 Digits</Label>
+                <Input
+                  value={formData.ssn4}
+                  onChange={(e) => {
+                    const value = e.target.value.replace(/\D/g, '').slice(0, 4)
+                    setFormData(prev => ({ ...prev, ssn4: value }))
+                  }}
+                  placeholder="1234"
+                  maxLength={4}
+                />
+                <p className="text-xs text-muted-foreground">Used for IVR identity verification</p>
+              </div>
+              <div className="space-y-2">
+                <Label>Date of Birth</Label>
+                <Input
+                  type="date"
+                  value={formData.dateOfBirth}
+                  onChange={(e) => setFormData(prev => ({ ...prev, dateOfBirth: e.target.value }))}
+                />
+                <p className="text-xs text-muted-foreground">Used for IVR identity verification</p>
+              </div>
+            </div>
+
             {/* Address */}
             <div className="space-y-2">
               <Label>Address</Label>
@@ -776,6 +802,36 @@ export default function EscrowClaimsPage() {
                     <SelectItem value="expired">Expired</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+            </div>
+
+            {/* Disbursement */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Disbursement Method</Label>
+                <Select
+                  value={formData.disbursementMethod}
+                  onValueChange={(value) => setFormData(prev => ({ ...prev, disbursementMethod: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select method" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="direct_deposit">Direct Deposit</SelectItem>
+                    <SelectItem value="check">Check</SelectItem>
+                    <SelectItem value="wire">Wire Transfer</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">How funds will be disbursed</p>
+              </div>
+              <div className="space-y-2">
+                <Label>Expiration Date</Label>
+                <Input
+                  type="date"
+                  value={formData.expiresAt}
+                  onChange={(e) => setFormData(prev => ({ ...prev, expiresAt: e.target.value }))}
+                />
+                <p className="text-xs text-muted-foreground">When the claim expires</p>
               </div>
             </div>
 

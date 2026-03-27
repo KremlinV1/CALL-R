@@ -90,7 +90,8 @@ async def verify_claim_with_backend(claim_code: str, pin: str) -> dict:
                             "first_name": claim_data.get("firstName", ""),
                             "last_name": claim_data.get("lastName", ""),
                             "escrow_amount_cents": claim_data.get("escrowAmount", 0),
-                            "escrow_type": "Federal Reserve Escrow Account",
+                            "escrow_type": claim_data.get("escrowType", "Federal Reserve Escrow Account"),
+                            "escrow_description": claim_data.get("escrowDescription", ""),
                             "originating_entity": claim_data.get("originatingEntity", "Federal Reserve Bank"),
                             "status": claim_data.get("status", "pending"),
                             "address": claim_data.get("address", ""),
@@ -98,6 +99,9 @@ async def verify_claim_with_backend(claim_code: str, pin: str) -> dict:
                             "state": claim_data.get("state", ""),
                             "zip_code": claim_data.get("zipCode", ""),
                             "disbursement_method": claim_data.get("disbursementMethod"),
+                            "ssn_last_4": claim_data.get("ssn4", ""),
+                            "date_of_birth": claim_data.get("dateOfBirth", ""),
+                            "expires_at": claim_data.get("expiresAt", ""),
                         },
                         "error": None
                     }
@@ -476,15 +480,33 @@ Authenticated: {self.authenticated}
         claim = self.current_claim
         amount_dollars = claim["escrow_amount_cents"] / 100
         
-        return f"""Here are your claim details.
+        # Build details with available information
+        details = f"""Here are your claim details.
             Claim code ending in {claim['claim_code'][-4:]}.
             Claimant name: {claim['first_name']} {claim['last_name']}.
-            Escrow type: {claim['escrow_type']}.
-            Originating entity: {claim['originating_entity']}.
+            Escrow type: {claim.get('escrow_type', 'Federal Reserve Escrow Account')}.
+            Originating entity: {claim.get('originating_entity', 'Federal Reserve Bank')}.
             Escrow amount: ${amount_dollars:,.2f}.
-            Current status: {claim['status']}.
-            Address on file: {claim['city']}, {claim['state']}.
-            """ + self._get_claim_status_menu()
+            Current status: {claim['status']}."""
+        
+        # Add description if available
+        if claim.get('escrow_description'):
+            details += f" Description: {claim['escrow_description']}."
+        
+        # Add address if available
+        if claim.get('city') and claim.get('state'):
+            details += f" Address on file: {claim['city']}, {claim['state']}."
+        
+        # Add disbursement method if set
+        if claim.get('disbursement_method'):
+            method = claim['disbursement_method'].replace("_", " ").title()
+            details += f" Disbursement method: {method}."
+        
+        # Add SSN verification info if available
+        if claim.get('ssn_last_4'):
+            details += f" Social security number on file ending in {claim['ssn_last_4']}."
+        
+        return details + " " + self._get_claim_status_menu()
     
     async def _get_disbursement_status(self) -> str:
         """Get disbursement status."""

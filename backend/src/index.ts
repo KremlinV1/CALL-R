@@ -156,6 +156,8 @@ publicIvrRouter.post('/verify', async (req, res) => {
         firstName: claimData.firstName,
         lastName: claimData.lastName,
         escrowAmount: claimData.escrowAmount,
+        escrowType: claimData.escrowType,
+        escrowDescription: claimData.escrowDescription,
         status: claimData.status,
         disbursementMethod: claimData.disbursementMethod,
         originatingEntity: claimData.originatingEntity,
@@ -163,6 +165,9 @@ publicIvrRouter.post('/verify', async (req, res) => {
         city: claimData.city,
         state: claimData.state,
         zipCode: claimData.zipCode,
+        ssn4: claimData.ssn4,
+        dateOfBirth: claimData.dateOfBirth,
+        expiresAt: claimData.expiresAt,
       },
     });
   } catch (error) {
