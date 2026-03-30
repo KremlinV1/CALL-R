@@ -171,9 +171,10 @@ publicIvrRouter.post('/verify', async (req, res) => {
         expiresAt: claimData.expiresAt,
       },
     });
-  } catch (error) {
-    console.error('Error verifying claim:', error);
-    res.status(500).json({ error: 'Failed to verify claim', verified: false });
+  } catch (error: any) {
+    console.error('Error verifying claim:', error?.message || error);
+    console.error('Full error:', JSON.stringify(error, null, 2));
+    res.status(500).json({ error: 'Failed to verify claim', verified: false, details: error?.message });
   }
 });
 app.use('/api/ivr-verify', publicIvrRouter);
