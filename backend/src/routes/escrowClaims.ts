@@ -57,15 +57,16 @@ router.get('/', async (req: AuthRequest, res: Response) => {
     
     if (search) {
       const searchTerm = `%${search}%`;
-      conditions.push(
-        or(
-          ilike(escrowClaims.claimCode, searchTerm),
-          ilike(escrowClaims.firstName, searchTerm),
-          ilike(escrowClaims.lastName, searchTerm),
-          ilike(escrowClaims.phone, searchTerm),
-          ilike(escrowClaims.email, searchTerm)
-        )
+      const searchCondition = or(
+        ilike(escrowClaims.claimCode, searchTerm),
+        ilike(escrowClaims.firstName, searchTerm),
+        ilike(escrowClaims.lastName, searchTerm),
+        ilike(escrowClaims.phone, searchTerm),
+        ilike(escrowClaims.email, searchTerm)
       );
+      if (searchCondition) {
+        conditions.push(searchCondition);
+      }
     }
     
     if (status && status !== 'all') {
