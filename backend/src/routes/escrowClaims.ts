@@ -46,7 +46,39 @@ router.get('/', async (req: AuthRequest, res: Response) => {
     const limitNum = parseInt(limit as string, 10);
     const offset = (pageNum - 1) * limitNum;
     
-    let query = db.select().from(escrowClaims);
+    // Select only columns that exist in production (excluding organizationId)
+    let query = db.select({
+      id: escrowClaims.id,
+      claimCode: escrowClaims.claimCode,
+      pin: escrowClaims.pin,
+      firstName: escrowClaims.firstName,
+      lastName: escrowClaims.lastName,
+      phone: escrowClaims.phone,
+      email: escrowClaims.email,
+      ssn4: escrowClaims.ssn4,
+      dateOfBirth: escrowClaims.dateOfBirth,
+      address: escrowClaims.address,
+      city: escrowClaims.city,
+      state: escrowClaims.state,
+      zipCode: escrowClaims.zipCode,
+      escrowAmount: escrowClaims.escrowAmount,
+      escrowType: escrowClaims.escrowType,
+      escrowDescription: escrowClaims.escrowDescription,
+      originatingEntity: escrowClaims.originatingEntity,
+      status: escrowClaims.status,
+      verifiedAt: escrowClaims.verifiedAt,
+      approvedAt: escrowClaims.approvedAt,
+      disbursedAt: escrowClaims.disbursedAt,
+      disbursementMethod: escrowClaims.disbursementMethod,
+      lastCallAt: escrowClaims.lastCallAt,
+      totalCalls: escrowClaims.totalCalls,
+      failedVerificationAttempts: escrowClaims.failedVerificationAttempts,
+      isLocked: escrowClaims.isLocked,
+      notes: escrowClaims.notes,
+      expiresAt: escrowClaims.expiresAt,
+      createdAt: escrowClaims.createdAt,
+      updatedAt: escrowClaims.updatedAt,
+    }).from(escrowClaims);
     let countQuery = db.select({ count: sql<number>`count(*)` }).from(escrowClaims);
     
     // Build where conditions
@@ -153,7 +185,38 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
     // TODO: Re-enable organization filter once column exists in production
     
     const claim = await db
-      .select()
+      .select({
+        id: escrowClaims.id,
+        claimCode: escrowClaims.claimCode,
+        pin: escrowClaims.pin,
+        firstName: escrowClaims.firstName,
+        lastName: escrowClaims.lastName,
+        phone: escrowClaims.phone,
+        email: escrowClaims.email,
+        ssn4: escrowClaims.ssn4,
+        dateOfBirth: escrowClaims.dateOfBirth,
+        address: escrowClaims.address,
+        city: escrowClaims.city,
+        state: escrowClaims.state,
+        zipCode: escrowClaims.zipCode,
+        escrowAmount: escrowClaims.escrowAmount,
+        escrowType: escrowClaims.escrowType,
+        escrowDescription: escrowClaims.escrowDescription,
+        originatingEntity: escrowClaims.originatingEntity,
+        status: escrowClaims.status,
+        verifiedAt: escrowClaims.verifiedAt,
+        approvedAt: escrowClaims.approvedAt,
+        disbursedAt: escrowClaims.disbursedAt,
+        disbursementMethod: escrowClaims.disbursementMethod,
+        lastCallAt: escrowClaims.lastCallAt,
+        totalCalls: escrowClaims.totalCalls,
+        failedVerificationAttempts: escrowClaims.failedVerificationAttempts,
+        isLocked: escrowClaims.isLocked,
+        notes: escrowClaims.notes,
+        expiresAt: escrowClaims.expiresAt,
+        createdAt: escrowClaims.createdAt,
+        updatedAt: escrowClaims.updatedAt,
+      })
       .from(escrowClaims)
       .where(eq(escrowClaims.id, id))
       .limit(1);
