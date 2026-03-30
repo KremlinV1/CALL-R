@@ -193,7 +193,7 @@ router.post('/', async (req: AuthRequest, res: Response) => {
         state: data.state || null,
         zipCode: data.zipCode || null,
         escrowAmount: Math.round(data.escrowAmount * 100), // Convert to cents
-        releaseFeeCents: Math.round((data.releaseFee || 0) * 100), // Convert to cents
+        // releaseFeeCents: Math.round((data.releaseFee || 0) * 100), // Column doesn't exist in production yet
         escrowType: data.escrowType,
         escrowDescription: data.escrowDescription || null,
         originatingEntity: data.originatingEntity || null,
@@ -264,7 +264,7 @@ router.put('/:id', async (req: AuthRequest, res: Response) => {
     if (data.state !== undefined) updateData.state = data.state || null;
     if (data.zipCode !== undefined) updateData.zipCode = data.zipCode || null;
     if (data.escrowAmount !== undefined) updateData.escrowAmount = Math.round(data.escrowAmount * 100);
-    if (data.releaseFee !== undefined) updateData.releaseFeeCents = Math.round(data.releaseFee * 100);
+    // if (data.releaseFee !== undefined) updateData.releaseFeeCents = Math.round(data.releaseFee * 100); // Column doesn't exist in production yet
     if (data.escrowType !== undefined) updateData.escrowType = data.escrowType;
     if (data.escrowDescription !== undefined) updateData.escrowDescription = data.escrowDescription || null;
     if (data.originatingEntity !== undefined) updateData.originatingEntity = data.originatingEntity || null;
