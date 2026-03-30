@@ -1008,6 +1008,7 @@ export const escrowClaimStatusEnum = pgEnum('escrow_claim_status', ['pending', '
 
 export const escrowClaims = pgTable('escrow_claims', {
   id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id),
   
   // Claim identification
   claimCode: varchar('claim_code', { length: 20 }).unique().notNull(), // e.g., "FRB-2024-001234"
