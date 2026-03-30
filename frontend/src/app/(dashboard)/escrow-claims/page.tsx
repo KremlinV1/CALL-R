@@ -289,6 +289,7 @@ export default function EscrowClaimsPage() {
       state: "",
       zipCode: "",
       escrowAmount: "",
+      releaseFee: "",
       escrowType: "federal_reserve",
       escrowDescription: "",
       originatingEntity: "Federal Reserve Bank",
