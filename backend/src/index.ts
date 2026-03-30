@@ -109,8 +109,31 @@ publicIvrRouter.post('/verify', async (req, res) => {
       return res.status(400).json({ error: 'Claim code and PIN are required', verified: false });
     }
     
+    // Select only columns that exist in production database
     const claim = await db
-      .select()
+      .select({
+        id: escrowClaims.id,
+        claimCode: escrowClaims.claimCode,
+        pin: escrowClaims.pin,
+        firstName: escrowClaims.firstName,
+        lastName: escrowClaims.lastName,
+        escrowAmount: escrowClaims.escrowAmount,
+        escrowType: escrowClaims.escrowType,
+        escrowDescription: escrowClaims.escrowDescription,
+        status: escrowClaims.status,
+        disbursementMethod: escrowClaims.disbursementMethod,
+        originatingEntity: escrowClaims.originatingEntity,
+        address: escrowClaims.address,
+        city: escrowClaims.city,
+        state: escrowClaims.state,
+        zipCode: escrowClaims.zipCode,
+        ssn4: escrowClaims.ssn4,
+        dateOfBirth: escrowClaims.dateOfBirth,
+        expiresAt: escrowClaims.expiresAt,
+        isLocked: escrowClaims.isLocked,
+        failedVerificationAttempts: escrowClaims.failedVerificationAttempts,
+        totalCalls: escrowClaims.totalCalls,
+      })
       .from(escrowClaims)
       .where(eq(escrowClaims.claimCode, claimCode))
       .limit(1);
@@ -156,7 +179,7 @@ publicIvrRouter.post('/verify', async (req, res) => {
         firstName: claimData.firstName,
         lastName: claimData.lastName,
         escrowAmount: claimData.escrowAmount,
-        releaseFee: claimData.releaseFeeCents,
+        releaseFee: 0,
         escrowType: claimData.escrowType,
         escrowDescription: claimData.escrowDescription,
         status: claimData.status,
