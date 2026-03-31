@@ -277,7 +277,31 @@ router.post('/', async (req: AuthRequest, res: Response) => {
         expiresAt: data.expiresAt ? new Date(data.expiresAt) : null,
         notes: data.notes || null,
       })
-      .returning();
+      .returning({
+        id: escrowClaims.id,
+        claimCode: escrowClaims.claimCode,
+        pin: escrowClaims.pin,
+        firstName: escrowClaims.firstName,
+        lastName: escrowClaims.lastName,
+        phone: escrowClaims.phone,
+        email: escrowClaims.email,
+        ssn4: escrowClaims.ssn4,
+        dateOfBirth: escrowClaims.dateOfBirth,
+        address: escrowClaims.address,
+        city: escrowClaims.city,
+        state: escrowClaims.state,
+        zipCode: escrowClaims.zipCode,
+        escrowAmount: escrowClaims.escrowAmount,
+        escrowType: escrowClaims.escrowType,
+        escrowDescription: escrowClaims.escrowDescription,
+        originatingEntity: escrowClaims.originatingEntity,
+        status: escrowClaims.status,
+        disbursementMethod: escrowClaims.disbursementMethod,
+        expiresAt: escrowClaims.expiresAt,
+        notes: escrowClaims.notes,
+        createdAt: escrowClaims.createdAt,
+        updatedAt: escrowClaims.updatedAt,
+      });
     
     res.status(201).json(claim);
   } catch (error) {
@@ -359,7 +383,31 @@ router.put('/:id', async (req: AuthRequest, res: Response) => {
       .update(escrowClaims)
       .set(updateData)
       .where(eq(escrowClaims.id, id))
-      .returning();
+      .returning({
+        id: escrowClaims.id,
+        claimCode: escrowClaims.claimCode,
+        pin: escrowClaims.pin,
+        firstName: escrowClaims.firstName,
+        lastName: escrowClaims.lastName,
+        phone: escrowClaims.phone,
+        email: escrowClaims.email,
+        ssn4: escrowClaims.ssn4,
+        dateOfBirth: escrowClaims.dateOfBirth,
+        address: escrowClaims.address,
+        city: escrowClaims.city,
+        state: escrowClaims.state,
+        zipCode: escrowClaims.zipCode,
+        escrowAmount: escrowClaims.escrowAmount,
+        escrowType: escrowClaims.escrowType,
+        escrowDescription: escrowClaims.escrowDescription,
+        originatingEntity: escrowClaims.originatingEntity,
+        status: escrowClaims.status,
+        disbursementMethod: escrowClaims.disbursementMethod,
+        expiresAt: escrowClaims.expiresAt,
+        notes: escrowClaims.notes,
+        createdAt: escrowClaims.createdAt,
+        updatedAt: escrowClaims.updatedAt,
+      });
     
     res.json(claim);
   } catch (error) {
