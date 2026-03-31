@@ -7,29 +7,29 @@ import { eq, and, or, ilike, sql, desc, asc } from 'drizzle-orm';
 
 const router = Router();
 
-// Create escrow claim schema
+// Create escrow claim schema - very lenient validation
 const createEscrowClaimSchema = z.object({
   claimCode: z.string().min(1, 'Claim code is required'),
   pin: z.string().min(4, 'PIN must be at least 4 characters'),
   firstName: z.string().min(1, 'First name is required'),
   lastName: z.string().min(1, 'Last name is required'),
-  phone: z.string().optional().or(z.literal('')),
-  email: z.string().email().optional().or(z.literal('')).or(z.literal(null)).transform(v => v || ''),
-  ssn4: z.string().max(4).optional().or(z.literal('')).or(z.literal(null)).transform(v => v || ''),
-  dateOfBirth: z.string().optional().or(z.literal('')).or(z.literal(null)),
-  address: z.string().optional().or(z.literal('')).or(z.literal(null)),
-  city: z.string().optional().or(z.literal('')).or(z.literal(null)),
-  state: z.string().optional().or(z.literal('')).or(z.literal(null)),
-  zipCode: z.string().optional().or(z.literal('')).or(z.literal(null)),
+  phone: z.string().optional().nullable().transform(v => v || ''),
+  email: z.string().optional().nullable().transform(v => v || ''),
+  ssn4: z.string().optional().nullable().transform(v => v || ''),
+  dateOfBirth: z.string().optional().nullable().transform(v => v || ''),
+  address: z.string().optional().nullable().transform(v => v || ''),
+  city: z.string().optional().nullable().transform(v => v || ''),
+  state: z.string().optional().nullable().transform(v => v || ''),
+  zipCode: z.string().optional().nullable().transform(v => v || ''),
   escrowAmount: z.number().min(0, 'Amount must be positive'),
   releaseFee: z.number().min(0).default(0),
-  escrowType: z.string().default('federal_reserve'),
-  escrowDescription: z.string().optional().or(z.literal('')).or(z.literal(null)),
-  originatingEntity: z.string().optional().or(z.literal('')).or(z.literal(null)),
-  status: z.enum(['pending', 'verified', 'processing', 'approved', 'disbursed', 'rejected', 'expired']).default('pending'),
-  disbursementMethod: z.string().optional().or(z.literal('')).or(z.literal(null)),
-  expiresAt: z.string().optional().or(z.literal('')).or(z.literal(null)),
-  notes: z.string().optional().or(z.literal('')).or(z.literal(null)),
+  escrowType: z.string().optional().nullable().default('federal_reserve'),
+  escrowDescription: z.string().optional().nullable().transform(v => v || ''),
+  originatingEntity: z.string().optional().nullable().transform(v => v || ''),
+  status: z.string().optional().nullable().default('pending'),
+  disbursementMethod: z.string().optional().nullable().transform(v => v || ''),
+  expiresAt: z.string().optional().nullable().transform(v => v || ''),
+  notes: z.string().optional().nullable().transform(v => v || ''),
 });
 
 // Update escrow claim schema
@@ -272,7 +272,7 @@ router.post('/', async (req: AuthRequest, res: Response) => {
         escrowType: data.escrowType,
         escrowDescription: data.escrowDescription || null,
         originatingEntity: data.originatingEntity || null,
-        status: data.status,
+        status: (data.status || 'pending') as 'pending' | 'verified' | 'processing' | 'approved' | 'disbursed' | 'rejected' | 'expired',
         disbursementMethod: data.disbursementMethod || null,
         expiresAt: data.expiresAt ? new Date(data.expiresAt) : null,
         notes: data.notes || null,
