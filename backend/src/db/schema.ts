@@ -1030,7 +1030,7 @@ export const escrowClaims = pgTable('escrow_claims', {
   
   // Escrow account details
   escrowAmount: integer('escrow_amount_cents').notNull(), // Amount in cents
-  releaseFeeCents: integer('release_fee_cents').default(0), // Fee required to release funds (in cents)
+  // releaseFeeCents: integer('release_fee_cents').default(0), // TODO: Re-enable after DB migration - column doesn't exist in production
   escrowType: varchar('escrow_type', { length: 100 }).default('federal_reserve'), // federal_reserve, treasury, tax_refund, etc.
   escrowDescription: text('escrow_description'),
   originatingEntity: varchar('originating_entity', { length: 255 }), // e.g., "US Treasury", "IRS", etc.
