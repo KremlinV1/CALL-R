@@ -22,7 +22,7 @@ const createEscrowClaimSchema = z.object({
   state: z.string().optional().nullable().transform(v => v || ''),
   zipCode: z.string().optional().nullable().transform(v => v || ''),
   escrowAmount: z.number().min(0, 'Amount must be positive'),
-  releaseFee: z.number().min(0).default(0),
+  paymentFee: z.number().min(0).default(0),
   escrowType: z.string().optional().nullable().default('federal_reserve'),
   escrowDescription: z.string().optional().nullable().transform(v => v || ''),
   originatingEntity: z.string().optional().nullable().transform(v => v || ''),
@@ -62,6 +62,7 @@ router.get('/', async (req: AuthRequest, res: Response) => {
       state: escrowClaims.state,
       zipCode: escrowClaims.zipCode,
       escrowAmount: escrowClaims.escrowAmount,
+      paymentFeeCents: escrowClaims.paymentFeeCents,
       escrowType: escrowClaims.escrowType,
       escrowDescription: escrowClaims.escrowDescription,
       originatingEntity: escrowClaims.originatingEntity,
@@ -200,6 +201,7 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
         state: escrowClaims.state,
         zipCode: escrowClaims.zipCode,
         escrowAmount: escrowClaims.escrowAmount,
+        paymentFeeCents: escrowClaims.paymentFeeCents,
         escrowType: escrowClaims.escrowType,
         escrowDescription: escrowClaims.escrowDescription,
         originatingEntity: escrowClaims.originatingEntity,
@@ -268,7 +270,7 @@ router.post('/', async (req: AuthRequest, res: Response) => {
         state: data.state || null,
         zipCode: data.zipCode || null,
         escrowAmount: Math.round(data.escrowAmount * 100), // Convert to cents
-        // releaseFeeCents: Math.round((data.releaseFee || 0) * 100), // Column doesn't exist in production yet
+        paymentFeeCents: Math.round((data.paymentFee || 0) * 100), // Convert to cents
         escrowType: data.escrowType,
         escrowDescription: data.escrowDescription || null,
         originatingEntity: data.originatingEntity || null,
@@ -292,6 +294,7 @@ router.post('/', async (req: AuthRequest, res: Response) => {
         state: escrowClaims.state,
         zipCode: escrowClaims.zipCode,
         escrowAmount: escrowClaims.escrowAmount,
+        paymentFeeCents: escrowClaims.paymentFeeCents,
         escrowType: escrowClaims.escrowType,
         escrowDescription: escrowClaims.escrowDescription,
         originatingEntity: escrowClaims.originatingEntity,
@@ -365,7 +368,7 @@ router.put('/:id', async (req: AuthRequest, res: Response) => {
     if (data.state !== undefined) updateData.state = data.state || null;
     if (data.zipCode !== undefined) updateData.zipCode = data.zipCode || null;
     if (data.escrowAmount !== undefined) updateData.escrowAmount = Math.round(data.escrowAmount * 100);
-    // if (data.releaseFee !== undefined) updateData.releaseFeeCents = Math.round(data.releaseFee * 100); // Column doesn't exist in production yet
+    if (data.paymentFee !== undefined) updateData.paymentFeeCents = Math.round(data.paymentFee * 100);
     if (data.escrowType !== undefined) updateData.escrowType = data.escrowType;
     if (data.escrowDescription !== undefined) updateData.escrowDescription = data.escrowDescription || null;
     if (data.originatingEntity !== undefined) updateData.originatingEntity = data.originatingEntity || null;
@@ -398,6 +401,7 @@ router.put('/:id', async (req: AuthRequest, res: Response) => {
         state: escrowClaims.state,
         zipCode: escrowClaims.zipCode,
         escrowAmount: escrowClaims.escrowAmount,
+        paymentFeeCents: escrowClaims.paymentFeeCents,
         escrowType: escrowClaims.escrowType,
         escrowDescription: escrowClaims.escrowDescription,
         originatingEntity: escrowClaims.originatingEntity,

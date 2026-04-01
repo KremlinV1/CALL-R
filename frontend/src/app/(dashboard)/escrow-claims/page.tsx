@@ -91,7 +91,7 @@ interface EscrowClaim {
   state?: string
   zipCode?: string
   escrowAmount: number
-  releaseFeeCents?: number
+  paymentFeeCents?: number
   escrowType: string
   escrowDescription?: string
   originatingEntity?: string
@@ -172,7 +172,7 @@ export default function EscrowClaimsPage() {
     state: "",
     zipCode: "",
     escrowAmount: "",
-    releaseFee: "",
+    paymentFee: "",
     escrowType: "federal_reserve",
     escrowDescription: "",
     originatingEntity: "Federal Reserve Bank",
@@ -216,7 +216,7 @@ export default function EscrowClaimsPage() {
       const payload = {
         ...data,
         escrowAmount: parseFloat(data.escrowAmount) || 0,
-        releaseFee: parseFloat(data.releaseFee) || 0,
+        paymentFee: parseFloat(data.paymentFee) || 0,
       }
       const { data: result } = await axios.post(`${API_URL}/escrow-claims`, payload, axiosConfig)
       return result
@@ -239,7 +239,7 @@ export default function EscrowClaimsPage() {
       const payload = {
         ...data,
         escrowAmount: parseFloat(data.escrowAmount) || 0,
-        releaseFee: parseFloat(data.releaseFee) || 0,
+        paymentFee: parseFloat(data.paymentFee) || 0,
       }
       const { data: result } = await axios.put(`${API_URL}/escrow-claims/${id}`, payload, axiosConfig)
       return result
@@ -289,7 +289,7 @@ export default function EscrowClaimsPage() {
       state: "",
       zipCode: "",
       escrowAmount: "",
-      releaseFee: "",
+      paymentFee: "",
       escrowType: "federal_reserve",
       escrowDescription: "",
       originatingEntity: "Federal Reserve Bank",
@@ -326,7 +326,7 @@ export default function EscrowClaimsPage() {
       state: claim.state || "",
       zipCode: claim.zipCode || "",
       escrowAmount: (claim.escrowAmount / 100).toString(),
-      releaseFee: ((claim.releaseFeeCents || 0) / 100).toString(),
+      paymentFee: ((claim.paymentFeeCents || 0) / 100).toString(),
       escrowType: claim.escrowType,
       escrowDescription: claim.escrowDescription || "",
       originatingEntity: claim.originatingEntity || "",
@@ -763,15 +763,15 @@ export default function EscrowClaimsPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Release Fee ($)</Label>
+                <Label>Payment Fee ($)</Label>
                 <Input
                   type="number"
                   step="0.01"
-                  value={formData.releaseFee}
-                  onChange={(e) => setFormData(prev => ({ ...prev, releaseFee: e.target.value }))}
+                  value={formData.paymentFee}
+                  onChange={(e) => setFormData(prev => ({ ...prev, paymentFee: e.target.value }))}
                   placeholder="500.00"
                 />
-                <p className="text-xs text-muted-foreground">Fee to release funds</p>
+                <p className="text-xs text-muted-foreground">Fee required to release funds (IVR will mention this)</p>
               </div>
               <div className="space-y-2">
                 <Label>Escrow Type</Label>
