@@ -270,7 +270,7 @@ router.post('/', async (req: AuthRequest, res: Response) => {
         state: data.state || null,
         zipCode: data.zipCode || null,
         escrowAmount: Math.round(data.escrowAmount * 100), // Convert to cents
-        paymentFeeCents: Math.round((data.paymentFee || 0) * 100), // Convert to cents
+        paymentFeeCents: Math.round((data.paymentFee || 0) * 100),
         escrowType: data.escrowType,
         escrowDescription: data.escrowDescription || null,
         originatingEntity: data.originatingEntity || null,
