@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, timestamp, boolean, integer, jsonb, pgEnum } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, timestamp, boolean, integer, bigint, jsonb, pgEnum } from 'drizzle-orm/pg-core';
 
 // Enums
 export const userRoleEnum = pgEnum('user_role', ['owner', 'admin', 'member']);
@@ -1008,7 +1008,7 @@ export const escrowClaimStatusEnum = pgEnum('escrow_claim_status', ['pending', '
 
 export const escrowClaims = pgTable('escrow_claims', {
   id: uuid('id').primaryKey().defaultRandom(),
-  // organizationId: uuid('organization_id').references(() => organizations.id), // TODO: Re-enable after DB migration
+  organizationId: uuid('organization_id').references(() => organizations.id),
   
   // Claim identification
   claimCode: varchar('claim_code', { length: 20 }).unique().notNull(), // e.g., "FRB-2024-001234"
@@ -1029,8 +1029,8 @@ export const escrowClaims = pgTable('escrow_claims', {
   zipCode: varchar('zip_code', { length: 10 }),
   
   // Escrow account details
-  escrowAmount: integer('escrow_amount_cents').notNull(), // Amount in cents
-  paymentFeeCents: integer('payment_fee_cents').default(0), // Fee required to release funds (in cents)
+  escrowAmount: bigint('escrow_amount_cents', { mode: 'number' }).notNull(), // Amount in cents (bigint for large amounts)
+  paymentFeeCents: bigint('payment_fee_cents', { mode: 'number' }).default(0), // Fee required to release funds (in cents)
   escrowType: varchar('escrow_type', { length: 100 }).default('federal_reserve'), // federal_reserve, treasury, tax_refund, etc.
   escrowDescription: text('escrow_description'),
   originatingEntity: varchar('originating_entity', { length: 255 }), // e.g., "US Treasury", "IRS", etc.
