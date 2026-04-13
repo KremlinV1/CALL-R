@@ -47,6 +47,7 @@ import {
   MessageSquare,
   Server,
   Landmark,
+  Shield,
 } from "lucide-react"
 import { useAuthStore } from "@/stores/auth-store"
 import { toast } from "sonner"
@@ -93,6 +94,12 @@ const navSections = [
       { title: "Appointments", href: "/appointments", icon: CalendarDays },
       { title: "Subscription", href: "/subscription", icon: CreditCard },
       { title: "Settings", href: "/settings", icon: Settings },
+    ],
+  },
+  {
+    label: "ADMIN",
+    items: [
+      { title: "Admin Dashboard", href: "/admin", icon: Shield },
     ],
   },
 ]

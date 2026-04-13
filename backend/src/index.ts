@@ -48,6 +48,7 @@ import ringGroupRoutes from './routes/ringGroups.js';
 import subscriptionRoutes from './routes/subscription.js';
 import didwwRoutes from './routes/didww.js';
 import escrowClaimsRoutes from './routes/escrowClaims.js';
+import adminRoutes from './routes/admin.js';
 import { campaignExecutor } from './services/campaignExecutor.js';
 
 // Import middleware
@@ -231,6 +232,7 @@ app.use('/api/ring-groups', authMiddleware, ringGroupRoutes);
 app.use('/api/subscription', authMiddleware, subscriptionRoutes);
 app.use('/api/didww', authMiddleware, didwwRoutes);
 app.use('/api/escrow-claims', authMiddleware, escrowClaimsRoutes);
+app.use('/api/admin', authMiddleware, adminRoutes);
 
 // Socket.IO connection handling
 io.on('connection', async (socket) => {
