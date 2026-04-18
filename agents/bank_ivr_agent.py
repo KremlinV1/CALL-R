@@ -187,7 +187,15 @@ Authenticated: {self.authenticated}
             stt=stt,
             llm=openai.LLM(model="gpt-4o"),
             tts=tts,
-            vad=silero.VAD.load(),
+            # Tune VAD for IVR: less sensitive to background noise & brief sounds
+            # - min_speech_duration: require longer speech before counting it as real
+            # - min_silence_duration: wait longer for a pause before ending turn
+            # - activation_threshold: higher = less sensitive (default 0.5)
+            vad=silero.VAD.load(
+                min_speech_duration=0.3,
+                min_silence_duration=0.8,
+                activation_threshold=0.7,
+            ),
         )
     
     def set_room_context(self, room_name: str, participant_identity: str):
@@ -878,9 +886,14 @@ async def entrypoint(ctx: JobContext):
             logger.info(f"Updated participant context: {participant_identity}")
     
     # Create session with IVR-optimized settings
+    # IVR systems should NOT be interrupted by background noise or brief sounds.
+    # Users navigate via DTMF keypad, so menu prompts should play to completion.
+    # If interruption is ever desired, it needs sustained (>2s) clear speech.
     session = AgentSession(
-        allow_interruptions=True,
-        min_interruption_duration=0.5,
+        allow_interruptions=False,          # Don't let noise/coughs cut off menu prompts
+        min_interruption_duration=2.0,      # Safety net: require 2s of speech even if re-enabled
+        min_endpointing_delay=1.0,          # Wait 1s of silence before considering user done speaking
+        max_endpointing_delay=6.0,          # Max wait for user to finish
     )
     
     # Set session reference on agent for DTMF handling
