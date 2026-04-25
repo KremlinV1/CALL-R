@@ -271,7 +271,8 @@ Authenticated: {self.authenticated}
             self.dtmf_buffer = ""
             response = await self._get_current_menu_prompt()
             if self._agent_session:
-                await self._agent_session.say(response)
+                handle = self._agent_session.say(response, allow_interruptions=False)
+                await handle.wait_for_playout()
             return
         
         # For single-digit menu selections, process immediately
@@ -454,7 +455,8 @@ Authenticated: {self.authenticated}
         
         # Say the response
         if response and self._agent_session:
-            await self._agent_session.say(response)
+            handle = self._agent_session.say(response, allow_interruptions=False)
+            await handle.wait_for_playout()
     
     async def _get_escrow_balance(self) -> str:
         """Get escrow balance for authenticated claimant."""
@@ -927,7 +929,8 @@ async def entrypoint(ctx: JobContext):
     # Say welcome message
     welcome = agent._get_welcome_message()
     logger.info(f"Saying welcome message: {welcome[:50]}...")
-    await session.say(welcome)
+    handle = session.say(welcome, allow_interruptions=False)
+    await handle.wait_for_playout()
     
     # The LiveKit agents framework keeps the entrypoint alive automatically
     # through the WorkerOptions/cli.run_app pattern - no explicit wait needed
