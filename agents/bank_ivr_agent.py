@@ -900,16 +900,22 @@ async def entrypoint(ctx: JobContext):
     
     # Set session reference on agent for DTMF handling
     agent.set_session(session)
-    
+
     # Register DTMF event handler
     @ctx.room.on("sip_dtmf_received")
     def on_dtmf_received(dtmf_event: rtc.SipDTMF):
         """Handle incoming DTMF tones from caller's keypad."""
         digit = dtmf_event.digit
         logger.info(f"📞 DTMF digit received: {digit}")
-        # Schedule the async handler
-        asyncio.create_task(agent.handle_dtmf(digit))
-    
+
+        async def _safe_handle():
+            try:
+                await agent.handle_dtmf(digit)
+            except Exception as e:
+                logger.exception(f"DTMF handler failed for digit {digit}: {e}")
+
+        asyncio.create_task(_safe_handle())
+
     await session.start(agent=agent, room=ctx.room)
     
     logger.info("Bank IVR Agent is now active with DTMF support")
@@ -929,8 +935,13 @@ async def entrypoint(ctx: JobContext):
     # Say welcome message
     welcome = agent._get_welcome_message()
     logger.info(f"Saying welcome message: {welcome[:50]}...")
-    handle = session.say(welcome, allow_interruptions=False)
-    await handle.wait_for_playout()
+    try:
+        handle = session.say(welcome, allow_interruptions=False)
+        logger.info("session.say() returned handle, waiting for playout...")
+        await handle.wait_for_playout()
+        logger.info("Welcome message playout complete")
+    except Exception as e:
+        logger.exception(f"FAILED to play welcome message: {e}")
     
     # The LiveKit agents framework keeps the entrypoint alive automatically
     # through the WorkerOptions/cli.run_app pattern - no explicit wait needed
