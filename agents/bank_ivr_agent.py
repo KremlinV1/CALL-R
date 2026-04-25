@@ -887,16 +887,9 @@ async def entrypoint(ctx: JobContext):
             agent.set_room_context(ctx.room.name, participant_identity)
             logger.info(f"Updated participant context: {participant_identity}")
     
-    # Create session with IVR-optimized settings
-    # IVR systems should NOT be interrupted by background noise or brief sounds.
-    # Users navigate via DTMF keypad, so menu prompts should play to completion.
-    # If interruption is ever desired, it needs sustained (>2s) clear speech.
-    session = AgentSession(
-        allow_interruptions=False,          # Don't let noise/coughs cut off menu prompts
-        min_interruption_duration=2.0,      # Safety net: require 2s of speech even if re-enabled
-        min_endpointing_delay=1.0,          # Wait 1s of silence before considering user done speaking
-        max_endpointing_delay=6.0,          # Max wait for user to finish
-    )
+    # Create session with default options (deprecated kwargs caused issues in 1.5.x).
+    # Per-utterance interruption control is set on each session.say() call instead.
+    session = AgentSession()
     
     # Set session reference on agent for DTMF handling
     agent.set_session(session)
@@ -929,8 +922,8 @@ async def entrypoint(ctx: JobContext):
         except asyncio.TimeoutError:
             logger.warning("Timeout waiting for audio subscription, proceeding anyway")
     
-    # Small delay for audio pipeline
-    await asyncio.sleep(0.3)
+    # Larger delay before first speech - lets the SIP gateway's RTP path stabilize
+    await asyncio.sleep(1.5)
     
     # Say welcome message
     welcome = agent._get_welcome_message()
