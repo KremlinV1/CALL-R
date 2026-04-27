@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { db } from '../db';
-import { users, organizations } from '../db/schema';
+import { users, organizations, escrowClaims } from '../db/schema';
 import { eq, ilike, or, and, sql, desc, count } from 'drizzle-orm';
 import { AuthRequest } from '../middleware/auth';
 import bcrypt from 'bcryptjs';
@@ -378,17 +378,18 @@ router.get('/organizations', requireAdmin, async (req: AuthRequest, res: Respons
       .from(organizations)
       .orderBy(desc(organizations.createdAt));
 
-    // Get user counts for each organization
+    // Get user counts and claim counts for each organization
     const orgsWithCounts = await Promise.all(
       allOrgs.map(async (org) => {
-        const userCountResult = await db
-          .select({ count: count() })
-          .from(users)
-          .where(eq(users.organizationId, org.id));
+        const [userCountResult, claimCountResult] = await Promise.all([
+          db.select({ count: count() }).from(users).where(eq(users.organizationId, org.id)),
+          db.select({ count: count() }).from(escrowClaims).where(eq(escrowClaims.organizationId, org.id)),
+        ]);
         return {
           ...org,
           _count: {
             users: Number(userCountResult[0]?.count || 0),
+            claims: Number(claimCountResult[0]?.count || 0),
           },
         };
       })

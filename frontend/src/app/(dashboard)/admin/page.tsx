@@ -109,6 +109,7 @@ interface Organization {
   updatedAt: string
   _count?: {
     users: number
+    claims: number
   }
 }
 
@@ -756,6 +757,7 @@ export default function AdminDashboard() {
                         <TableHead>Organization</TableHead>
                         <TableHead>Slug</TableHead>
                         <TableHead>Users</TableHead>
+                        <TableHead>Claims</TableHead>
                         <TableHead>Timezone</TableHead>
                         <TableHead>Created</TableHead>
                         <TableHead className="w-[50px]"></TableHead>
@@ -764,7 +766,7 @@ export default function AdminDashboard() {
                     <TableBody>
                       {organizations.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                          <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                             No organizations found
                           </TableCell>
                         </TableRow>
@@ -789,6 +791,9 @@ export default function AdminDashboard() {
                             </TableCell>
                             <TableCell>
                               <Badge variant="secondary">{org._count?.users || 0} users</Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline">{org._count?.claims || 0} claims</Badge>
                             </TableCell>
                             <TableCell>
                               <span className="text-sm">{org.timezone}</span>
