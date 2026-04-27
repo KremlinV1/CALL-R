@@ -1,0 +1,12 @@
+# Ignore model files (too large for git)
+*.onnx
+*.pth
+*.pt
+*.bin
+*.safetensors
+*.jpg
+*.png
+
+# Keep this directory in git
+!.gitignore
+!.gitkeep

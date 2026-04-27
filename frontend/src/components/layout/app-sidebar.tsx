@@ -48,6 +48,7 @@ import {
   Server,
   Landmark,
   Shield,
+  Video,
 } from "lucide-react"
 import { useAuthStore } from "@/stores/auth-store"
 import { toast } from "sonner"
@@ -83,6 +84,7 @@ const navSections = [
     label: "COMMUNICATE",
     items: [
       { title: "Messages", href: "/messages", icon: MessageSquare },
+      { title: "Video Calls", href: "/video-calls", icon: Video },
       { title: "DNC List", href: "/dnc", icon: ShieldAlert },
     ],
   },

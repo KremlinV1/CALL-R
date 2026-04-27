@@ -49,6 +49,7 @@ import subscriptionRoutes from './routes/subscription.js';
 import didwwRoutes from './routes/didww.js';
 import escrowClaimsRoutes from './routes/escrowClaims.js';
 import adminRoutes from './routes/admin.js';
+import videoCallsRoutes from './routes/videoCalls.js';
 import { campaignExecutor } from './services/campaignExecutor.js';
 
 // Import middleware
@@ -233,6 +234,12 @@ app.use('/api/subscription', authMiddleware, subscriptionRoutes);
 app.use('/api/didww', authMiddleware, didwwRoutes);
 app.use('/api/escrow-claims', authMiddleware, escrowClaimsRoutes);
 app.use('/api/admin', authMiddleware, adminRoutes);
+
+// Video calls — customer join endpoint is public, all other endpoints require auth
+app.use('/api/video-calls', (req, res, next) => {
+  if (req.path.startsWith('/customer/')) return next();
+  return authMiddleware(req as any, res, next);
+}, videoCallsRoutes);
 
 // Socket.IO connection handling
 io.on('connection', async (socket) => {

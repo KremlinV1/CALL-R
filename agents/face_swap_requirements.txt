@@ -1,0 +1,18 @@
+# LiveKit Agents Framework
+livekit-agents>=0.8.0
+
+# Core dependencies
+python-dotenv>=1.0.0
+loguru>=0.7.0
+numpy>=1.24.0
+
+# Face swap dependencies
+insightface>=0.7.3
+onnxruntime-gpu>=1.16.0    # Use onnxruntime (no -gpu) for CPU-only
+opencv-python-headless>=4.8.0
+
+# Optional: face enhancement
+# gfpgan>=1.3.8
+
+# Utilities
+httpx>=0.25.0
