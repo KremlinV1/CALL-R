@@ -37,10 +37,10 @@ export default function SignupPage() {
       // Store in auth store
       setAuth(data.user, data.organization, data.token)
       
-      toast.success(`Welcome to Pon E Line, ${data.user.firstName}!`)
+      toast.success("Account created! Please verify your email.")
       
-      // Redirect to dashboard
-      router.push("/dashboard")
+      // Redirect to check-email page
+      router.push("/check-email")
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Registration failed"
       setError(errorMessage)

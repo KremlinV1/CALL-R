@@ -34,9 +34,14 @@ export default function LoginPage() {
       // Store in auth store
       setAuth(data.user, data.organization, data.token)
       
+      // Check if email is verified
+      if (!data.user.emailVerified) {
+        toast.info("Please verify your email to continue.")
+        router.push("/check-email")
+        return
+      }
+
       toast.success(`Welcome back, ${data.user.firstName}!`)
-      
-      // Redirect to dashboard
       router.push("/dashboard")
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Login failed"

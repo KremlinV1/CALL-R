@@ -6,6 +6,7 @@ export interface User {
   firstName: string;
   lastName: string;
   role: string;
+  emailVerified?: boolean;
 }
 
 export interface Organization {
@@ -46,6 +47,16 @@ export const authApi = {
 
   getMe: async (): Promise<{ user: User }> => {
     const { data } = await apiClient.get<{ user: User }>('/auth/me');
+    return data;
+  },
+
+  verifyEmail: async (token: string): Promise<{ message: string }> => {
+    const { data } = await apiClient.post<{ message: string }>('/auth/verify-email', { token });
+    return data;
+  },
+
+  resendVerification: async (): Promise<{ message: string }> => {
+    const { data } = await apiClient.post<{ message: string }>('/auth/resend-verification');
     return data;
   },
 

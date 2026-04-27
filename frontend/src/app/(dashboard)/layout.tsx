@@ -8,6 +8,7 @@ import { Separator } from "@/components/ui/separator"
 import { ThemeToggle } from "@/components/ui/theme-toggle"
 import { Bell, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { authApi } from "@/lib/api"
 
 export default function DashboardLayout({
   children,
@@ -19,14 +20,29 @@ export default function DashboardLayout({
   const [hasToken, setHasToken] = useState(false)
 
   useEffect(() => {
-    // Check if there's a token in localStorage on mount
-    const storedToken = localStorage.getItem("token")
-    if (!storedToken) {
-      router.replace("/")
-    } else {
-      setHasToken(true)
+    const checkAuth = async () => {
+      const storedToken = localStorage.getItem("token")
+      if (!storedToken) {
+        router.replace("/")
+        setIsChecking(false)
+        return
+      }
+
+      try {
+        const { user } = await authApi.getMe()
+        if (!user.emailVerified) {
+          router.replace("/check-email")
+          setIsChecking(false)
+          return
+        }
+        setHasToken(true)
+      } catch {
+        router.replace("/login")
+      }
+      setIsChecking(false)
     }
-    setIsChecking(false)
+
+    checkAuth()
   }, [router])
 
   // Show loading while checking auth

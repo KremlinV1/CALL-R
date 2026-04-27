@@ -2,7 +2,8 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { hash, verify } from '@node-rs/argon2';
 import { eq } from 'drizzle-orm';
-import { generateToken } from '../middleware/auth.js';
+import crypto from 'crypto';
+import { generateToken, verifyToken } from '../middleware/auth.js';
 import { db } from '../db/index.js';
 import { users, organizations } from '../db/schema.js';
 
@@ -47,6 +48,10 @@ router.post('/register', async (req: Request, res: Response) => {
       slug: orgSlug,
     }).returning();
 
+    // Generate verification token
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+    const verificationTokenExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
     // Create user
     const [user] = await db.insert(users).values({
       organizationId: org.id,
@@ -55,9 +60,17 @@ router.post('/register', async (req: Request, res: Response) => {
       firstName: data.firstName,
       lastName: data.lastName,
       role: 'admin',
+      emailVerified: false,
+      verificationToken,
+      verificationTokenExpiresAt,
     }).returning();
 
-    // Generate token
+    // Log verification URL (replace with email service in production)
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const verifyUrl = `${frontendUrl}/verify-email?token=${verificationToken}`;
+    console.log(`\n📧 Verification email for ${user.email}:\n   ${verifyUrl}\n`);
+
+    // Generate JWT token
     const token = await generateToken({
       sub: user.id,
       email: user.email,
@@ -73,6 +86,7 @@ router.post('/register', async (req: Request, res: Response) => {
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
+        emailVerified: false,
       },
       organization: {
         id: org.id,
@@ -138,6 +152,7 @@ router.post('/login', async (req: Request, res: Response) => {
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
+        emailVerified: user.emailVerified ?? false,
       },
       organization: org ? {
         id: org.id,
@@ -190,6 +205,7 @@ router.get('/me', async (req: Request, res: Response) => {
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
+        emailVerified: user.emailVerified ?? false,
       },
       organization: org ? {
         id: org.id,
@@ -199,6 +215,98 @@ router.get('/me', async (req: Request, res: Response) => {
     });
   } catch (error) {
     res.status(401).json({ error: 'Invalid or expired token' });
+  }
+});
+
+// Verify email
+router.post('/verify-email', async (req: Request, res: Response) => {
+  try {
+    const { token } = req.body;
+    if (!token || typeof token !== 'string') {
+      res.status(400).json({ error: 'Verification token is required' });
+      return;
+    }
+
+    const user = await db.query.users.findFirst({
+      where: eq(users.verificationToken, token),
+    });
+
+    if (!user) {
+      res.status(400).json({ error: 'Invalid verification token' });
+      return;
+    }
+
+    if (user.emailVerified) {
+      res.json({ message: 'Email already verified' });
+      return;
+    }
+
+    if (user.verificationTokenExpiresAt && user.verificationTokenExpiresAt < new Date()) {
+      res.status(400).json({ error: 'Verification token has expired. Please request a new one.' });
+      return;
+    }
+
+    await db.update(users)
+      .set({
+        emailVerified: true,
+        verificationToken: null,
+        verificationTokenExpiresAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, user.id));
+
+    res.json({ message: 'Email verified successfully' });
+  } catch (error) {
+    console.error('Verify email error:', error);
+    res.status(500).json({ error: 'Verification failed' });
+  }
+});
+
+// Resend verification email
+router.post('/resend-verification', async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const jwtToken = authHeader.split(' ')[1];
+    const payload = await verifyToken(jwtToken);
+
+    const user = await db.query.users.findFirst({
+      where: eq(users.id, payload.sub as string),
+    });
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    if (user.emailVerified) {
+      res.json({ message: 'Email already verified' });
+      return;
+    }
+
+    const newToken = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    await db.update(users)
+      .set({
+        verificationToken: newToken,
+        verificationTokenExpiresAt: expiresAt,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, user.id));
+
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const verifyUrl = `${frontendUrl}/verify-email?token=${newToken}`;
+    console.log(`\n📧 Re-sent verification email for ${user.email}:\n   ${verifyUrl}\n`);
+
+    res.json({ message: 'Verification email resent' });
+  } catch (error) {
+    console.error('Resend verification error:', error);
+    res.status(500).json({ error: 'Failed to resend verification email' });
   }
 });
 

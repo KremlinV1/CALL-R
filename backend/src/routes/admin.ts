@@ -280,6 +280,88 @@ router.delete('/users/:id', requireAdmin, async (req: AuthRequest, res: Response
   }
 });
 
+// Manually verify a user's email (admin action)
+router.post('/users/:id/verify', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const user = await db.select({ id: users.id, emailVerified: users.emailVerified }).from(users).where(eq(users.id, id)).limit(1);
+    if (user.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (user[0].emailVerified) {
+      return res.json({ message: 'User is already verified' });
+    }
+
+    await db.update(users)
+      .set({
+        emailVerified: true,
+        verificationToken: null,
+        verificationTokenExpiresAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, id));
+
+    res.json({ message: 'User verified successfully' });
+  } catch (error) {
+    console.error('Error verifying user:', error);
+    res.status(500).json({ error: 'Failed to verify user' });
+  }
+});
+
+// Get verification link for a user (admin action)
+router.get('/users/:id/verification-link', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const user = await db
+      .select({
+        id: users.id,
+        email: users.email,
+        emailVerified: users.emailVerified,
+        verificationToken: users.verificationToken,
+        verificationTokenExpiresAt: users.verificationTokenExpiresAt,
+      })
+      .from(users)
+      .where(eq(users.id, id))
+      .limit(1);
+
+    if (user.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (user[0].emailVerified) {
+      return res.json({ verified: true, message: 'User is already verified' });
+    }
+
+    let token = user[0].verificationToken;
+
+    // If no token or expired, generate a new one
+    if (!token || (user[0].verificationTokenExpiresAt && user[0].verificationTokenExpiresAt < new Date())) {
+      const crypto = await import('crypto');
+      token = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      await db.update(users)
+        .set({
+          verificationToken: token,
+          verificationTokenExpiresAt: expiresAt,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, id));
+    }
+
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const verifyUrl = `${frontendUrl}/verify-email?token=${token}`;
+
+    res.json({ verified: false, verificationLink: verifyUrl, email: user[0].email });
+  } catch (error) {
+    console.error('Error getting verification link:', error);
+    res.status(500).json({ error: 'Failed to get verification link' });
+  }
+});
+
 // Get all organizations
 router.get('/organizations', requireAdmin, async (req: AuthRequest, res: Response) => {
   try {

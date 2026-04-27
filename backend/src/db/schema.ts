@@ -32,6 +32,8 @@ export const users = pgTable('users', {
   phone: varchar('phone', { length: 20 }),
   role: userRoleEnum('role').default('member').notNull(),
   emailVerified: boolean('email_verified').default(false),
+  verificationToken: varchar('verification_token', { length: 255 }),
+  verificationTokenExpiresAt: timestamp('verification_token_expires_at'),
   avatarUrl: varchar('avatar_url', { length: 500 }),
   lastLoginAt: timestamp('last_login_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),

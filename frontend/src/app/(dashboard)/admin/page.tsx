@@ -75,6 +75,9 @@ import {
   Crown,
   UserCog,
   User,
+  ClipboardCopy,
+  ShieldCheck,
+  Link2,
 } from "lucide-react"
 import { useAuthStore } from "@/stores/auth-store"
 import { format } from "date-fns"
@@ -268,6 +271,40 @@ export default function AdminDashboard() {
       toast.error(error.response?.data?.error || "Failed to delete user")
     }
   })
+
+  // Verify user mutation (admin action)
+  const verifyUserMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const response = await axios.post(`${API_URL}/admin/users/${id}/verify`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      return response.data
+    },
+    onSuccess: () => {
+      toast.success("User verified successfully")
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] })
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.error || "Failed to verify user")
+    }
+  })
+
+  // Copy verification link
+  const handleCopyVerificationLink = async (userId: string) => {
+    try {
+      const response = await axios.get(`${API_URL}/admin/users/${userId}/verification-link`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (response.data.verified) {
+        toast.info("User is already verified")
+        return
+      }
+      await navigator.clipboard.writeText(response.data.verificationLink)
+      toast.success("Verification link copied to clipboard")
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || "Failed to get verification link")
+    }
+  }
 
   // Create organization mutation
   const createOrgMutation = useMutation({
@@ -656,6 +693,19 @@ export default function AdminDashboard() {
                                     <Key className="mr-2 h-4 w-4" />
                                     Reset Password
                                   </DropdownMenuItem>
+                                  {!user.emailVerified && (
+                                    <>
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuItem onClick={() => verifyUserMutation.mutate(user.id)}>
+                                        <ShieldCheck className="mr-2 h-4 w-4 text-green-600" />
+                                        Verify User
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem onClick={() => handleCopyVerificationLink(user.id)}>
+                                        <Link2 className="mr-2 h-4 w-4" />
+                                        Copy Verification Link
+                                      </DropdownMenuItem>
+                                    </>
+                                  )}
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem 
                                     className="text-destructive"

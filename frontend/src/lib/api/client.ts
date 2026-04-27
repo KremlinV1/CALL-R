@@ -33,7 +33,7 @@ apiClient.interceptors.response.use(
         localStorage.removeItem('token');
         localStorage.removeItem('user');
         // Redirect to login if not already there
-        if (window.location.pathname !== '/login' && window.location.pathname !== '/signup') {
+        if (window.location.pathname !== '/login' && window.location.pathname !== '/signup' && window.location.pathname !== '/check-email' && window.location.pathname !== '/verify-email') {
           window.location.href = '/login';
         }
       }
