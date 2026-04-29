@@ -290,7 +290,14 @@ router.post('/sync-livekit', async (req: AuthRequest, res: Response) => {
 
     const { livekitService } = await import('../services/livekit.js');
     if (!livekitService.isConfigured()) {
-      return res.status(400).json({ error: 'LiveKit not configured (missing LIVEKIT_URL / API_KEY / API_SECRET)' });
+      const missing: string[] = [];
+      if (!process.env.LIVEKIT_URL) missing.push('LIVEKIT_URL');
+      if (!process.env.LIVEKIT_API_KEY) missing.push('LIVEKIT_API_KEY');
+      if (!process.env.LIVEKIT_API_SECRET) missing.push('LIVEKIT_API_SECRET');
+      return res.status(400).json({
+        error: `LiveKit not configured. Missing env vars: ${missing.join(', ')}`,
+        missing,
+      });
     }
 
     // Pull both inbound and outbound trunks — either can have numbers attached

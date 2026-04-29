@@ -9,7 +9,9 @@ class LiveKitService {
   private apiSecret: string;
 
   constructor() {
-    this.livekitUrl = process.env.LIVEKIT_URL || '';
+    const rawUrl = process.env.LIVEKIT_URL || '';
+    // SipClient & RoomServiceClient expect HTTP(S) URLs, not WS(S)
+    this.livekitUrl = rawUrl.replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://');
     this.apiKey = process.env.LIVEKIT_API_KEY || '';
     this.apiSecret = process.env.LIVEKIT_API_SECRET || '';
 
