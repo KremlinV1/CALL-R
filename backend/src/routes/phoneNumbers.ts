@@ -300,6 +300,18 @@ router.post('/sync-livekit', async (req: AuthRequest, res: Response) => {
       });
     }
 
+    // First, try LiveKit Cloud's PhoneNumberService — this lists ALL numbers
+    // owned in the LiveKit Cloud account regardless of trunk assignment.
+    // Falls back to trunk-based listing if that API isn't available.
+    let cloudNumbers: any[] = [];
+    try {
+      const cloudResp: any = await livekitService.listPhoneNumbers();
+      cloudNumbers = cloudResp?.phoneNumbers || cloudResp?.numbers || cloudResp?.items || [];
+      console.log(`📞 LiveKit Cloud returned ${cloudNumbers.length} phone numbers`);
+    } catch (e: any) {
+      console.warn('LiveKit Cloud listPhoneNumbers failed, falling back to trunks:', e.message);
+    }
+
     // Pull both inbound and outbound trunks — either can have numbers attached
     const [inbound, outbound] = await Promise.all([
       livekitService.listInboundTrunks().catch(() => []),
@@ -328,6 +340,21 @@ router.post('/sync-livekit', async (req: AuthRequest, res: Response) => {
 
     // Collect all unique numbers with their trunk context
     const numbersMap = new Map<string, { trunkId: string; trunkName: string; direction: 'inbound' | 'outbound' }>();
+
+    // 1) Numbers from LiveKit Cloud PhoneNumberService (includes toll-free etc.)
+    for (const pn of cloudNumbers) {
+      // Field names vary across API versions — handle common shapes
+      const raw = pn.phoneNumber || pn.e164 || pn.number || pn.id;
+      if (!raw) continue;
+      const e164 = formatE164(raw);
+      if (!numbersMap.has(e164)) {
+        numbersMap.set(e164, {
+          trunkId: pn.trunkId || pn.sipTrunkId || '',
+          trunkName: pn.label || pn.name || 'LiveKit Cloud',
+          direction: 'inbound',
+        });
+      }
+    }
 
     for (const trunk of inbound as any[]) {
       const nums: string[] = trunk.numbers || [];
