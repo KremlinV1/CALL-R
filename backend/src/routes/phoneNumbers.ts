@@ -304,10 +304,13 @@ router.post('/sync-livekit', async (req: AuthRequest, res: Response) => {
     // owned in the LiveKit Cloud account regardless of trunk assignment.
     // Falls back to trunk-based listing if that API isn't available.
     let cloudNumbers: any[] = [];
+    let cloudRawSample: any = null;
     try {
       const cloudResp: any = await livekitService.listPhoneNumbers();
       cloudNumbers = cloudResp?.phoneNumbers || cloudResp?.numbers || cloudResp?.items || [];
+      cloudRawSample = cloudNumbers[0] || null;
       console.log(`📞 LiveKit Cloud returned ${cloudNumbers.length} phone numbers`);
+      if (cloudRawSample) console.log('📞 Sample shape:', JSON.stringify(cloudRawSample));
     } catch (e: any) {
       console.warn('LiveKit Cloud listPhoneNumbers failed, falling back to trunks:', e.message);
     }
@@ -342,11 +345,24 @@ router.post('/sync-livekit', async (req: AuthRequest, res: Response) => {
     const numbersMap = new Map<string, { trunkId: string; trunkName: string; direction: 'inbound' | 'outbound' }>();
 
     // 1) Numbers from LiveKit Cloud PhoneNumberService (includes toll-free etc.)
+    // Field names vary across API versions — try every plausible key for the
+    // E.164 number, but NEVER fall back to `id` (which is a UUID and would
+    // produce garbage E.164 strings).
+    const NUMBER_KEYS = ['phoneNumber', 'phone_number', 'e164', 'number', 'sipPhoneNumber', 'sip_phone_number', 'address'];
     for (const pn of cloudNumbers) {
-      // Field names vary across API versions — handle common shapes
-      const raw = pn.phoneNumber || pn.e164 || pn.number || pn.id;
+      let raw: string | undefined;
+      for (const k of NUMBER_KEYS) {
+        const v = pn?.[k];
+        // Only accept strings that actually look like phone numbers
+        if (typeof v === 'string' && /[+\d]/.test(v) && v.replace(/\D/g, '').length >= 10) {
+          raw = v;
+          break;
+        }
+      }
       if (!raw) continue;
       const e164 = formatE164(raw);
+      // Sanity check the result is a plausible E.164 (+1XXXXXXXXXX = 12 chars min)
+      if (e164.replace(/\D/g, '').length < 10) continue;
       if (!numbersMap.has(e164)) {
         numbersMap.set(e164, {
           trunkId: pn.trunkId || pn.sipTrunkId || '',
@@ -451,6 +467,9 @@ router.post('/sync-livekit', async (req: AuthRequest, res: Response) => {
       numbers: importedNumbers,
       tollFreeNumber: firstTollFree,
       tollFreeProfile,
+      // Include LiveKit Cloud sample shape to help debug field-name issues
+      cloudSample: cloudRawSample,
+      cloudCount: cloudNumbers.length,
       message: firstTollFree
         ? `Imported ${imported} numbers. Toll-free ${firstTollFree} set as default caller ID "Escrow Account Services".`
         : `Imported ${imported} numbers. No toll-free number detected.`,
