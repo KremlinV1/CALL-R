@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { AuthRequest } from '../middleware/auth.js';
 import { db } from '../db/index.js';
-import { phoneNumbers, telephonyConfig, agents } from '../db/schema.js';
+import { phoneNumbers, telephonyConfig, agents, callerIdProfiles } from '../db/schema.js';
 import { eq, and, desc } from 'drizzle-orm';
 import { decryptApiKey } from '../utils/crypto.js';
 import { createTelnyxService } from '../services/telnyx.js';
@@ -274,6 +274,156 @@ router.get('/agents', async (req: AuthRequest, res: Response) => {
   } catch (error: any) {
     console.error('Error fetching agents:', error);
     res.status(500).json({ error: 'Failed to fetch agents' });
+  }
+});
+
+// ─── LiveKit Sync ──────────────────────────────────────────────────
+// POST /api/phone-numbers/sync-livekit
+// Discover all phone numbers from the configured LiveKit SIP trunks and
+// import them into the DB. Automatically detects US toll-free numbers
+// (800/833/844/855/866/877/888) and creates a default Caller ID profile
+// named "Escrow Account Services" pointing to the first toll-free number.
+router.post('/sync-livekit', async (req: AuthRequest, res: Response) => {
+  try {
+    const organizationId = (req as any).user?.organizationId;
+    if (!organizationId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { livekitService } = await import('../services/livekit.js');
+    if (!livekitService.isConfigured()) {
+      return res.status(400).json({ error: 'LiveKit not configured (missing LIVEKIT_URL / API_KEY / API_SECRET)' });
+    }
+
+    // Pull both inbound and outbound trunks — either can have numbers attached
+    const [inbound, outbound] = await Promise.all([
+      livekitService.listInboundTrunks().catch(() => []),
+      livekitService.listOutboundTrunks().catch(() => []),
+    ]);
+
+    // Helper: detect US toll-free prefixes
+    const isTollFree = (num: string): boolean => {
+      const digits = num.replace(/\D/g, '');
+      // Match +1 8NN numbers where NN is 00/33/44/55/66/77/88
+      const tollFreePrefixes = ['800', '833', '844', '855', '866', '877', '888'];
+      if (digits.length === 11 && digits.startsWith('1')) {
+        return tollFreePrefixes.includes(digits.substring(1, 4));
+      }
+      if (digits.length === 10) {
+        return tollFreePrefixes.includes(digits.substring(0, 3));
+      }
+      return false;
+    };
+
+    const formatE164 = (num: string): string => {
+      if (num.startsWith('+')) return num;
+      const digits = num.replace(/\D/g, '');
+      return digits.startsWith('1') ? `+${digits}` : `+1${digits}`;
+    };
+
+    // Collect all unique numbers with their trunk context
+    const numbersMap = new Map<string, { trunkId: string; trunkName: string; direction: 'inbound' | 'outbound' }>();
+
+    for (const trunk of inbound as any[]) {
+      const nums: string[] = trunk.numbers || [];
+      for (const num of nums) {
+        const e164 = formatE164(num);
+        if (!numbersMap.has(e164)) {
+          numbersMap.set(e164, { trunkId: trunk.sipTrunkId, trunkName: trunk.name, direction: 'inbound' });
+        }
+      }
+    }
+    for (const trunk of outbound as any[]) {
+      const nums: string[] = trunk.numbers || [];
+      for (const num of nums) {
+        const e164 = formatE164(num);
+        if (!numbersMap.has(e164)) {
+          numbersMap.set(e164, { trunkId: trunk.sipTrunkId, trunkName: trunk.name, direction: 'outbound' });
+        }
+      }
+    }
+
+    if (numbersMap.size === 0) {
+      return res.json({ imported: 0, skipped: 0, message: 'No numbers found on LiveKit trunks', tollFreeProfile: null });
+    }
+
+    // Fetch existing numbers for this org to skip duplicates
+    const existing = await db.select({ number: phoneNumbers.number }).from(phoneNumbers).where(eq(phoneNumbers.organizationId, organizationId));
+    const existingSet = new Set(existing.map(e => e.number));
+
+    let imported = 0;
+    let skipped = 0;
+    const importedNumbers: any[] = [];
+    let firstTollFree: string | null = null;
+
+    for (const [e164, info] of numbersMap.entries()) {
+      if (existingSet.has(e164)) { skipped++; continue; }
+
+      const tollFree = isTollFree(e164);
+      if (tollFree && !firstTollFree) firstTollFree = e164;
+
+      const [created] = await db.insert(phoneNumbers).values({
+        organizationId,
+        number: e164,
+        provider: 'livekit',
+        providerSid: info.trunkId,
+        label: info.trunkName || null,
+        type: tollFree ? 'toll_free' : 'local',
+        capabilities: { voice: true, sms: false },
+        status: 'active',
+      }).returning();
+
+      importedNumbers.push(created);
+      imported++;
+    }
+
+    // If we found a toll-free number, create a default "Escrow Account Services"
+    // caller ID profile for it (or ensure one exists).
+    let tollFreeProfile = null;
+    if (firstTollFree) {
+      // Check if a profile already exists for this number
+      const existingProfile = await db.select().from(callerIdProfiles).where(and(
+        eq(callerIdProfiles.organizationId, organizationId),
+        eq(callerIdProfiles.displayNumber, firstTollFree),
+      )).limit(1);
+
+      if (existingProfile.length === 0) {
+        // Clear any existing defaults first
+        await db.update(callerIdProfiles)
+          .set({ isDefault: false, updatedAt: new Date() })
+          .where(and(
+            eq(callerIdProfiles.organizationId, organizationId),
+            eq(callerIdProfiles.isDefault, true),
+          ));
+
+        const [profile] = await db.insert(callerIdProfiles).values({
+          organizationId,
+          name: 'Escrow Account Services',
+          displayNumber: firstTollFree,
+          displayName: 'Escrow Account Services',
+          mode: 'owned',
+          isDefault: true,
+          priority: 100,
+          isActive: true,
+        }).returning();
+        tollFreeProfile = profile;
+      } else {
+        tollFreeProfile = existingProfile[0];
+      }
+    }
+
+    res.json({
+      imported,
+      skipped,
+      total: numbersMap.size,
+      numbers: importedNumbers,
+      tollFreeNumber: firstTollFree,
+      tollFreeProfile,
+      message: firstTollFree
+        ? `Imported ${imported} numbers. Toll-free ${firstTollFree} set as default caller ID "Escrow Account Services".`
+        : `Imported ${imported} numbers. No toll-free number detected.`,
+    });
+  } catch (error: any) {
+    console.error('Error syncing phone numbers from LiveKit:', error);
+    res.status(500).json({ error: error.message || 'Failed to sync LiveKit numbers' });
   }
 });
 

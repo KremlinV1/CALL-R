@@ -20,6 +20,9 @@ const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY;
 const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET;
 const LIVEKIT_SIP_TRUNK_OUTBOUND = process.env.LIVEKIT_SIP_TRUNK_OUTBOUND;
 const LIVEKIT_SIP_TRUNK_INBOUND = process.env.LIVEKIT_SIP_TRUNK_INBOUND;
+// Fallback outbound caller number (e.g. your toll-free number) used when no
+// number/pool/caller-ID profile has been selected for a call.
+const DEFAULT_FROM_NUMBER = process.env.DEFAULT_FROM_NUMBER || '';
 
 // Phone numbers (legacy)
 const VONAGE_PHONE_NUMBER = process.env.VONAGE_PHONE_NUMBER || '';
@@ -493,6 +496,13 @@ router.post('/outbound', async (req: AuthRequest, res: Response) => {
       console.warn('⚠️ Caller ID resolution failed, using raw fromNumber:', cidErr.message);
     }
 
+    // Final fallback: use DEFAULT_FROM_NUMBER env var (e.g. org toll-free number)
+    // if nothing else has been resolved yet.
+    if (!fromNumber && DEFAULT_FROM_NUMBER) {
+      fromNumber = DEFAULT_FROM_NUMBER.startsWith('+') ? DEFAULT_FROM_NUMBER : `+${DEFAULT_FROM_NUMBER.replace(/\D/g, '')}`;
+      console.log(`📞 Using DEFAULT_FROM_NUMBER env fallback: ${fromNumber}`);
+    }
+
     // Create room/call identifier
     const roomName = `call-${crypto.randomUUID().slice(0, 8)}`;
     
@@ -643,6 +653,9 @@ router.post('/outbound', async (req: AuthRequest, res: Response) => {
             participantName: 'Customer',
             playRingtone: true,
             ringingTimeout: 60,  // Wait up to 60 seconds for answer
+            // Pass the resolved fromNumber so recipient sees our caller ID
+            // (falls back to trunk default number if fromNumber is empty)
+            ...(fromNumber ? { fromNumber } : {}),
           }
         );
         console.log('✅ SIP participant created:', sipResult);

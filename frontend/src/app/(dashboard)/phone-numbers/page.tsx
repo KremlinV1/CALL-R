@@ -151,6 +151,32 @@ export default function PhoneNumbersPage() {
     onError: () => toast.error('Failed to remove phone number'),
   });
 
+  // Sync phone numbers from LiveKit SIP trunks + auto-set toll-free as default
+  const syncLivekitMutation = useMutation({
+    mutationFn: async () => {
+      const res = await axios.post(
+        `${API_URL}/phone-numbers/sync-livekit`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      return res.data as {
+        imported: number;
+        skipped: number;
+        total: number;
+        tollFreeNumber?: string | null;
+        message: string;
+      };
+    },
+    onSuccess: (data) => {
+      toast.success(data.message || `Imported ${data.imported} numbers from LiveKit`);
+      queryClient.invalidateQueries({ queryKey: ['phone-numbers'] });
+      queryClient.invalidateQueries({ queryKey: ['caller-id-profiles'] });
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.error || 'Failed to sync from LiveKit');
+    },
+  });
+
   const updateMutation = useMutation({
     mutationFn: async ({ id, ...data }: { id: string; label?: string; agentId?: string | null; callerIdProfileId?: string | null; status?: string }) => {
       const res = await axios.put(`${API_URL}/phone-numbers/db/${id}`, data, {
@@ -183,6 +209,14 @@ export default function PhoneNumbersPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={() => syncLivekitMutation.mutate()} disabled={syncLivekitMutation.isPending}>
+            {syncLivekitMutation.isPending ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="mr-2 h-4 w-4" />
+            )}
+            Sync from LiveKit
+          </Button>
           <Button variant="outline" onClick={() => setDidwwImportOpen(true)}>
             <Download className="mr-2 h-4 w-4" />
             Import from DIDWW
