@@ -42,9 +42,38 @@ DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "")
 # Backend API URL for escrow claims verification
 BACKEND_API_URL = os.getenv("BACKEND_API_URL", "https://call-r.onrender.com")
 
-# Bank name configuration
+# Default bank name configuration (used when no institution metadata is provided)
 BANK_NAME = "Federal Reserve Bank Escrow Accounts"
 BANK_SHORT_NAME = "FRBEA"
+
+# Map escrow_type code → friendly institution name spoken by the IVR
+INSTITUTIONS = {
+    "federal_reserve": "Federal Reserve Bank Escrow Accounts",
+    "bank_of_america": "Bank of America Escrow Department",
+    "chase": "Chase Bank Escrow Department",
+    "wells_fargo": "Wells Fargo Escrow Department",
+    "treasury": "US Treasury Escrow Department",
+    "tax_refund": "IRS Tax Refund Department",
+    "settlement": "Legal Settlement Escrow Department",
+    "inheritance": "Inheritance Trust Department",
+    "insurance": "Insurance Payout Department",
+}
+
+
+def institution_name_for(escrow_type: Optional[str]) -> str:
+    """Return the friendly institution name to speak for a given escrow_type code.
+
+    Falls back to the default BANK_NAME when no mapping is found.
+    Also handles the case where escrow_type is already a friendly name.
+    """
+    if not escrow_type:
+        return BANK_NAME
+    if escrow_type in INSTITUTIONS:
+        return INSTITUTIONS[escrow_type]
+    # If already looks like a friendly name (contains a space), return as-is
+    if " " in escrow_type:
+        return escrow_type
+    return BANK_NAME
 
 
 class MenuState(Enum):
@@ -128,9 +157,14 @@ class BankIVRAgent(Agent):
     Supports both voice commands and DTMF (keypad) input.
     """
     
-    def __init__(self, room_name: str = None, participant_identity: str = None):
+    def __init__(self, room_name: str = None, participant_identity: str = None,
+                 institution_name: Optional[str] = None, escrow_type: Optional[str] = None):
         self.room_name = room_name
         self.participant_identity = participant_identity
+        # Dynamic institution name — defaults to BANK_NAME, overridden by room metadata
+        # or by the claim's escrow_type after the caller authenticates
+        self.escrow_type = escrow_type
+        self.institution_name = institution_name or institution_name_for(escrow_type)
         self.current_state = MenuState.WELCOME
         self.authenticated = False
         self.current_claim = None
@@ -153,7 +187,7 @@ class BankIVRAgent(Agent):
         tts = openai.TTS(voice="nova")  # Professional female voice
         
         # Escrow Claims IVR system prompt
-        system_prompt = f"""You are the automated voice system for {BANK_NAME}. You are a professional, secure, and authoritative government escrow claims assistant.
+        system_prompt = f"""You are the automated voice system for {self.institution_name}. You are a professional, secure, and authoritative escrow claims assistant.
 
 CRITICAL RULES:
 1. You are an IVR (Interactive Voice Response) system - be concise, clear, and official-sounding
@@ -204,10 +238,10 @@ Authenticated: {self.authenticated}
         self.participant_identity = participant_identity
     
     def _get_welcome_message(self) -> str:
-        """Generate the welcome message."""
-        return f"""Thank you for calling the {BANK_NAME} claims verification line. 
+        """Generate the welcome message using the dynamic institution name."""
+        return f"""Welcome to the {self.institution_name}. Thank you for calling our claims verification line.
         This call may be recorded for quality and training purposes.
-        For English, press 1. 
+        For English, press 1.
         Para Español, oprima 2."""
     
     def _get_main_menu(self) -> str:
@@ -327,11 +361,11 @@ Authenticated: {self.authenticated}
             if input_value == "1":
                 self.language = "english"
                 self.current_state = MenuState.ENTER_CLAIM_CODE
-                response = f"You've selected English. Welcome to the {BANK_NAME} claims verification system. To access your escrow account, please enter your 6-digit claim code now."
+                response = f"You've selected English. Welcome to the {self.institution_name} claims verification system. To access your escrow account, please enter your 6-digit claim code now."
             elif input_value == "2":
                 self.language = "spanish"
                 self.current_state = MenuState.ENTER_CLAIM_CODE
-                response = f"Ha seleccionado Español. Bienvenido al sistema de verificación de reclamos de {BANK_NAME}. Para acceder a su cuenta de depósito, ingrese su código de reclamo de 6 dígitos."
+                response = f"Ha seleccionado Español. Bienvenido al sistema de verificación de reclamos de {self.institution_name}. Para acceder a su cuenta de depósito, ingrese su código de reclamo de 6 dígitos."
             else:
                 response = "Invalid selection. " + self._get_welcome_message()
         
@@ -356,8 +390,14 @@ Authenticated: {self.authenticated}
                     self.current_claim = result["claim"]
                     self.failed_auth_attempts = 0
                     self.current_state = MenuState.MAIN_MENU
+                    # Switch institution name to match the verified claim's escrow type
+                    claim_escrow_type = result["claim"].get("escrow_type")
+                    if claim_escrow_type:
+                        self.escrow_type = claim_escrow_type
+                        self.institution_name = institution_name_for(claim_escrow_type)
+                        logger.info(f"Switched institution to: {self.institution_name} (type={claim_escrow_type})")
                     amount_dollars = result["claim"]["escrow_amount_cents"] / 100
-                    response = f"Thank you, {result['claim']['first_name']}. Your identity has been verified. Your escrow account shows a balance of ${amount_dollars:,.2f}. " + self._get_main_menu()
+                    response = f"Thank you, {result['claim']['first_name']}. Welcome to the {self.institution_name}. Your identity has been verified. Your escrow account shows a balance of ${amount_dollars:,.2f}. " + self._get_main_menu()
                 elif result["error"] == "not_found":
                     self.failed_auth_attempts += 1
                     if self.failed_auth_attempts >= self.max_auth_attempts:
@@ -585,11 +625,11 @@ Authenticated: {self.authenticated}
         if language.lower() in ["1", "english", "one"]:
             self.language = "english"
             self.current_state = MenuState.ENTER_CLAIM_CODE
-            return f"You've selected English. Welcome to the {BANK_NAME} claims verification system. To access your escrow account, please enter your 6-digit claim code."
+            return f"You've selected English. Welcome to the {self.institution_name} claims verification system. To access your escrow account, please enter your 6-digit claim code."
         elif language.lower() in ["2", "spanish", "español", "espanol", "two"]:
             self.language = "spanish"
             self.current_state = MenuState.ENTER_CLAIM_CODE
-            return f"Ha seleccionado Español. Bienvenido al sistema de verificación de {BANK_NAME}. Por favor ingrese su código de reclamo de 6 dígitos."
+            return f"Ha seleccionado Español. Bienvenido al sistema de verificación de {self.institution_name}. Por favor ingrese su código de reclamo de 6 dígitos."
         else:
             return self._get_welcome_message()
     
@@ -663,8 +703,13 @@ Authenticated: {self.authenticated}
             self.current_claim = result["claim"]
             self.failed_auth_attempts = 0
             self.current_state = MenuState.MAIN_MENU
+            # Switch institution name to match the verified claim's escrow type
+            claim_escrow_type = result["claim"].get("escrow_type")
+            if claim_escrow_type:
+                self.escrow_type = claim_escrow_type
+                self.institution_name = institution_name_for(claim_escrow_type)
             amount_dollars = result["claim"]["escrow_amount_cents"] / 100
-            return f"Thank you, {result['claim']['first_name']}. Your identity has been verified. Your escrow account shows a balance of ${amount_dollars:,.2f}. " + self._get_main_menu()
+            return f"Thank you, {result['claim']['first_name']}. Welcome to the {self.institution_name}. Your identity has been verified. Your escrow account shows a balance of ${amount_dollars:,.2f}. " + self._get_main_menu()
         elif result["error"] == "not_found":
             self.failed_auth_attempts += 1
             if self.failed_auth_attempts >= self.max_auth_attempts:
@@ -863,7 +908,21 @@ async def entrypoint(ctx: JobContext):
     
     # Connect to the room
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
-    
+
+    # Read room metadata to determine which institution this call is for.
+    # Backend can pass {"escrowType": "bank_of_america"} (or full friendly name)
+    # in room.metadata when dispatching the agent for a specific claim.
+    metadata_escrow_type: Optional[str] = None
+    metadata_institution_name: Optional[str] = None
+    try:
+        if ctx.room.metadata:
+            md = json.loads(ctx.room.metadata)
+            metadata_escrow_type = md.get("escrowType") or md.get("escrow_type")
+            metadata_institution_name = md.get("institutionName") or md.get("institution_name")
+            logger.info(f"Room metadata — escrowType={metadata_escrow_type}, institution={metadata_institution_name}")
+    except Exception as e:
+        logger.warning(f"Could not parse room metadata: {e}")
+
     # Get participant identity for SIP transfers
     participant_identity = None
     for participant in ctx.room.remote_participants.values():
@@ -871,12 +930,15 @@ async def entrypoint(ctx: JobContext):
             participant_identity = participant.identity
             logger.info(f"Found caller participant: {participant_identity}")
             break
-    
-    # Create the Bank IVR agent
+
+    # Create the Bank IVR agent with the institution context (if any)
     agent = BankIVRAgent(
         room_name=ctx.room.name,
-        participant_identity=participant_identity
+        participant_identity=participant_identity,
+        institution_name=metadata_institution_name,
+        escrow_type=metadata_escrow_type,
     )
+    logger.info(f"IVR agent will identify as: {agent.institution_name}")
     
     # Listen for new participants
     @ctx.room.on("participant_connected")

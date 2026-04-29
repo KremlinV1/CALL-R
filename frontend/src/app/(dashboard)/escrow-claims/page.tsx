@@ -130,12 +130,15 @@ const STATUS_COLORS: Record<string, string> = {
 }
 
 const ESCROW_TYPES = [
-  { value: "federal_reserve", label: "Federal Reserve" },
-  { value: "treasury", label: "US Treasury" },
-  { value: "tax_refund", label: "Tax Refund" },
-  { value: "settlement", label: "Legal Settlement" },
-  { value: "inheritance", label: "Inheritance" },
-  { value: "insurance", label: "Insurance Payout" },
+  { value: "federal_reserve", label: "Federal Reserve", entity: "Federal Reserve Bank" },
+  { value: "bank_of_america", label: "Bank of America", entity: "Bank of America" },
+  { value: "chase", label: "Chase Bank", entity: "JPMorgan Chase Bank" },
+  { value: "wells_fargo", label: "Wells Fargo", entity: "Wells Fargo Bank" },
+  { value: "treasury", label: "US Treasury", entity: "US Department of the Treasury" },
+  { value: "tax_refund", label: "Tax Refund", entity: "Internal Revenue Service" },
+  { value: "settlement", label: "Legal Settlement", entity: "Legal Settlement Trust" },
+  { value: "inheritance", label: "Inheritance", entity: "Inheritance Trust" },
+  { value: "insurance", label: "Insurance Payout", entity: "Insurance Company" },
 ]
 
 const US_STATES = [
@@ -777,7 +780,15 @@ export default function EscrowClaimsPage() {
                 <Label>Escrow Type</Label>
                 <Select
                   value={formData.escrowType}
-                  onValueChange={(value) => setFormData(prev => ({ ...prev, escrowType: value }))}
+                  onValueChange={(value) => {
+                    const matchedType = ESCROW_TYPES.find(t => t.value === value)
+                    setFormData(prev => ({
+                      ...prev,
+                      escrowType: value,
+                      // Auto-fill originating entity when changing type, unless user customized it
+                      originatingEntity: matchedType?.entity || prev.originatingEntity,
+                    }))
+                  }}
                 >
                   <SelectTrigger>
                     <SelectValue />
