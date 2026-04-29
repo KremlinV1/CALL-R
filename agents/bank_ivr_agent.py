@@ -238,8 +238,12 @@ Authenticated: {self.authenticated}
         self.participant_identity = participant_identity
     
     def _get_welcome_message(self) -> str:
-        """Generate the welcome message using the dynamic institution name."""
-        return f"""Welcome to the {self.institution_name}. Thank you for calling our claims verification line.
+        """Generic welcome message played before authentication.
+
+        We keep this generic intentionally — the caller's specific institution
+        is revealed after they authenticate with their claim code + PIN.
+        """
+        return """Welcome to the Escrow Claims Account Services. Thank you for calling our claims verification line.
         This call may be recorded for quality and training purposes.
         For English, press 1.
         Para Español, oprima 2."""
@@ -361,11 +365,11 @@ Authenticated: {self.authenticated}
             if input_value == "1":
                 self.language = "english"
                 self.current_state = MenuState.ENTER_CLAIM_CODE
-                response = f"You've selected English. Welcome to the {self.institution_name} claims verification system. To access your escrow account, please enter your 6-digit claim code now."
+                response = "You've selected English. To access your escrow account, please enter your 6-digit claim code now."
             elif input_value == "2":
                 self.language = "spanish"
                 self.current_state = MenuState.ENTER_CLAIM_CODE
-                response = f"Ha seleccionado Español. Bienvenido al sistema de verificación de reclamos de {self.institution_name}. Para acceder a su cuenta de depósito, ingrese su código de reclamo de 6 dígitos."
+                response = "Ha seleccionado Español. Para acceder a su cuenta de depósito, ingrese su código de reclamo de 6 dígitos."
             else:
                 response = "Invalid selection. " + self._get_welcome_message()
         
@@ -625,11 +629,11 @@ Authenticated: {self.authenticated}
         if language.lower() in ["1", "english", "one"]:
             self.language = "english"
             self.current_state = MenuState.ENTER_CLAIM_CODE
-            return f"You've selected English. Welcome to the {self.institution_name} claims verification system. To access your escrow account, please enter your 6-digit claim code."
+            return "You've selected English. To access your escrow account, please enter your 6-digit claim code."
         elif language.lower() in ["2", "spanish", "español", "espanol", "two"]:
             self.language = "spanish"
             self.current_state = MenuState.ENTER_CLAIM_CODE
-            return f"Ha seleccionado Español. Bienvenido al sistema de verificación de {self.institution_name}. Por favor ingrese su código de reclamo de 6 dígitos."
+            return "Ha seleccionado Español. Por favor ingrese su código de reclamo de 6 dígitos."
         else:
             return self._get_welcome_message()
     
