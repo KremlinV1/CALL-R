@@ -342,13 +342,13 @@ router.post('/sync-livekit', async (req: AuthRequest, res: Response) => {
     };
 
     // Collect all unique numbers with their trunk context
-    const numbersMap = new Map<string, { trunkId: string; trunkName: string; direction: 'inbound' | 'outbound' }>();
+    const numbersMap = new Map<string, { trunkId: string; trunkName: string; direction: 'inbound' | 'outbound'; tollFreeHint?: boolean }>();
 
     // 1) Numbers from LiveKit Cloud PhoneNumberService (includes toll-free etc.)
     // Field names vary across API versions — try every plausible key for the
     // E.164 number, but NEVER fall back to `id` (which is a UUID and would
     // produce garbage E.164 strings).
-    const NUMBER_KEYS = ['phoneNumber', 'phone_number', 'e164', 'number', 'sipPhoneNumber', 'sip_phone_number', 'address'];
+    const NUMBER_KEYS = ['e164_format', 'e164Format', 'phoneNumber', 'phone_number', 'e164', 'number', 'sipPhoneNumber', 'sip_phone_number', 'address'];
     for (const pn of cloudNumbers) {
       let raw: string | undefined;
       for (const k of NUMBER_KEYS) {
@@ -364,10 +364,13 @@ router.post('/sync-livekit', async (req: AuthRequest, res: Response) => {
       // Sanity check the result is a plausible E.164 (+1XXXXXXXXXX = 12 chars min)
       if (e164.replace(/\D/g, '').length < 10) continue;
       if (!numbersMap.has(e164)) {
+        const numberType: string = pn.number_type || pn.numberType || '';
+        const tollFreeHint = /TOLL_?FREE/i.test(numberType);
         numbersMap.set(e164, {
           trunkId: pn.trunkId || pn.sipTrunkId || '',
           trunkName: pn.label || pn.name || 'LiveKit Cloud',
           direction: 'inbound',
+          tollFreeHint,
         });
       }
     }
@@ -405,10 +408,12 @@ router.post('/sync-livekit', async (req: AuthRequest, res: Response) => {
     let firstTollFree: string | null = null;
 
     for (const [e164, info] of numbersMap.entries()) {
-      if (existingSet.has(e164)) { skipped++; continue; }
-
-      const tollFree = isTollFree(e164);
+      const tollFree = info.tollFreeHint || isTollFree(e164);
+      // Track the first toll-free we saw — even if it's already imported,
+      // we still want to ensure a default caller-ID profile exists for it.
       if (tollFree && !firstTollFree) firstTollFree = e164;
+
+      if (existingSet.has(e164)) { skipped++; continue; }
 
       const [created] = await db.insert(phoneNumbers).values({
         organizationId,
