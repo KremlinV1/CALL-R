@@ -27,7 +27,7 @@ from livekit.agents import (
     function_tool,
     RunContext,
 )
-from livekit.plugins import openai, silero, cartesia, deepgram
+from livekit.plugins import openai, silero, cartesia, deepgram, elevenlabs
 
 load_dotenv()
 
@@ -401,7 +401,7 @@ Authenticated: {self.authenticated}
                         self.institution_name = institution_name_for(claim_escrow_type)
                         logger.info(f"Switched institution to: {self.institution_name} (type={claim_escrow_type})")
                     amount_dollars = result["claim"]["escrow_amount_cents"] / 100
-                    response = f"Thank you, {result['claim']['first_name']}. Welcome to the {self.institution_name}. Your identity has been verified. Your escrow account shows a balance of ${amount_dollars:,.2f}. " + self._get_main_menu()
+                    response = f"Thank you, {result['claim']['first_name']}. Welcome to the {self.institution_name}. Your identity has been verified. Your escrow account shows a balance of ${amount_dollars:,.0f}. " + self._get_main_menu()
                 elif result["error"] == "not_found":
                     self.failed_auth_attempts += 1
                     if self.failed_auth_attempts >= self.max_auth_attempts:
@@ -510,10 +510,10 @@ Authenticated: {self.authenticated}
         amount_dollars = self.current_claim["escrow_amount_cents"] / 100
         payment_fee = self.current_claim.get("payment_fee_cents", 0) / 100
         
-        response = f"Your escrow account balance is ${amount_dollars:,.2f}. This amount is held by the {self.current_claim['originating_entity']} and is pending disbursement."
+        response = f"Your escrow account balance is ${amount_dollars:,.0f}. This amount is held by the {self.current_claim['originating_entity']} and is pending disbursement."
         
         if payment_fee > 0:
-            response += f" To release these funds, a payment fee of ${payment_fee:,.2f} is required."
+            response += f" To release these funds, a payment fee of ${payment_fee:,.0f} is required."
         
         return response + " " + self._get_claim_status_menu()
     
@@ -548,12 +548,12 @@ Authenticated: {self.authenticated}
             Claimant name: {claim['first_name']} {claim['last_name']}.
             Escrow type: {claim.get('escrow_type', 'Federal Reserve Escrow Account')}.
             Originating entity: {claim.get('originating_entity', 'Federal Reserve Bank')}.
-            Escrow amount: ${amount_dollars:,.2f}."""
+            Escrow amount: ${amount_dollars:,.0f}."""
         
         # Add payment fee if applicable
         payment_fee = claim.get("payment_fee_cents", 0) / 100
         if payment_fee > 0:
-            details += f" Payment fee required: ${payment_fee:,.2f}."
+            details += f" Payment fee required: ${payment_fee:,.0f}."
         
         details += f" Current status: {claim['status']}."
         
@@ -713,7 +713,7 @@ Authenticated: {self.authenticated}
                 self.escrow_type = claim_escrow_type
                 self.institution_name = institution_name_for(claim_escrow_type)
             amount_dollars = result["claim"]["escrow_amount_cents"] / 100
-            return f"Thank you, {result['claim']['first_name']}. Welcome to the {self.institution_name}. Your identity has been verified. Your escrow account shows a balance of ${amount_dollars:,.2f}. " + self._get_main_menu()
+            return f"Thank you, {result['claim']['first_name']}. Welcome to the {self.institution_name}. Your identity has been verified. Your escrow account shows a balance of ${amount_dollars:,.0f}. " + self._get_main_menu()
         elif result["error"] == "not_found":
             self.failed_auth_attempts += 1
             if self.failed_auth_attempts >= self.max_auth_attempts:
@@ -794,27 +794,27 @@ Authenticated: {self.authenticated}
         amount_dollars = self.current_claim["escrow_amount_cents"] / 100
         
         if method in ["1", "direct_deposit", "direct deposit", "bank"]:
-            return f"""To set up direct deposit for your escrow amount of ${amount_dollars:,.2f}, 
+            return f"""To set up direct deposit for your escrow amount of ${amount_dollars:,.0f}, 
             a claims specialist will contact you within 24 hours to securely collect your banking information.
             Direct deposit typically processes within 3 to 5 business days after verification.
             """ + self._get_disbursement_menu()
         
         elif method in ["2", "check"]:
             address = f"{self.current_claim['address']}, {self.current_claim['city']}, {self.current_claim['state']} {self.current_claim['zip_code']}"
-            return f"""A check for ${amount_dollars:,.2f} will be mailed to your address on file: {address}.
+            return f"""A check for ${amount_dollars:,.0f} will be mailed to your address on file: {address}.
             Please allow 7 to 10 business days for delivery.
             To update your mailing address before we send the check, press 0 to speak with a specialist.
             """ + self._get_disbursement_menu()
         
         elif method in ["3", "wire", "wire transfer"]:
             if amount_dollars >= 10000:
-                return f"""Wire transfer is available for your escrow amount of ${amount_dollars:,.2f}.
+                return f"""Wire transfer is available for your escrow amount of ${amount_dollars:,.0f}.
                 A claims specialist will contact you within 48 hours to verify wire instructions.
                 Wire transfers typically process within 3 to 5 business days.
                 A wire transfer fee of $25 will be deducted from your disbursement.
                 """ + self._get_disbursement_menu()
             else:
-                return f"Wire transfers are only available for amounts over $10,000. Your escrow balance is ${amount_dollars:,.2f}. Please select direct deposit or check instead. " + self._get_disbursement_menu()
+                return f"Wire transfers are only available for amounts over $10,000. Your escrow balance is ${amount_dollars:,.0f}. Please select direct deposit or check instead. " + self._get_disbursement_menu()
         
         else:
             return "Invalid selection. " + self._get_disbursement_menu()
