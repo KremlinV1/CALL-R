@@ -400,7 +400,7 @@ Authenticated: {self.authenticated}
                         self.escrow_type = claim_escrow_type
                         self.institution_name = institution_name_for(claim_escrow_type)
                         logger.info(f"Switched institution to: {self.institution_name} (type={claim_escrow_type})")
-                    amount_dollars = result["claim"]["escrow_amount_cents"] / 100
+                    amount_dollars = result["claim"]["escrow_amount_cents"] // 100
                     response = f"Thank you, {result['claim']['first_name']}. Welcome to the {self.institution_name}. Your identity has been verified. Your escrow account shows a balance of ${amount_dollars:,.0f}. " + self._get_main_menu()
                 elif result["error"] == "not_found":
                     self.failed_auth_attempts += 1
@@ -507,8 +507,8 @@ Authenticated: {self.authenticated}
         if not self.authenticated or not self.current_claim:
             return "Please verify your claim first. " + self._get_main_menu()
         
-        amount_dollars = self.current_claim["escrow_amount_cents"] / 100
-        payment_fee = self.current_claim.get("payment_fee_cents", 0) / 100
+        amount_dollars = self.current_claim["escrow_amount_cents"] // 100
+        payment_fee = self.current_claim.get("payment_fee_cents", 0) // 100
         
         response = f"Your escrow account balance is ${amount_dollars:,.0f}. This amount is held by the {self.current_claim['originating_entity']} and is pending disbursement."
         
@@ -540,7 +540,7 @@ Authenticated: {self.authenticated}
             return "Please verify your claim first. " + self._get_main_menu()
         
         claim = self.current_claim
-        amount_dollars = claim["escrow_amount_cents"] / 100
+        amount_dollars = claim["escrow_amount_cents"] // 100
         
         # Build details with available information
         details = f"""Here are your claim details.
@@ -551,7 +551,7 @@ Authenticated: {self.authenticated}
             Escrow amount: ${amount_dollars:,.0f}."""
         
         # Add payment fee if applicable
-        payment_fee = claim.get("payment_fee_cents", 0) / 100
+        payment_fee = claim.get("payment_fee_cents", 0) // 100
         if payment_fee > 0:
             details += f" Payment fee required: ${payment_fee:,.0f}."
         
@@ -712,7 +712,7 @@ Authenticated: {self.authenticated}
             if claim_escrow_type:
                 self.escrow_type = claim_escrow_type
                 self.institution_name = institution_name_for(claim_escrow_type)
-            amount_dollars = result["claim"]["escrow_amount_cents"] / 100
+            amount_dollars = result["claim"]["escrow_amount_cents"] // 100
             return f"Thank you, {result['claim']['first_name']}. Welcome to the {self.institution_name}. Your identity has been verified. Your escrow account shows a balance of ${amount_dollars:,.0f}. " + self._get_main_menu()
         elif result["error"] == "not_found":
             self.failed_auth_attempts += 1
@@ -791,7 +791,7 @@ Authenticated: {self.authenticated}
             return self._get_disbursement_menu()
         
         method = method.lower().strip()
-        amount_dollars = self.current_claim["escrow_amount_cents"] / 100
+        amount_dollars = self.current_claim["escrow_amount_cents"] // 100
         
         if method in ["1", "direct_deposit", "direct deposit", "bank"]:
             return f"""To set up direct deposit for your escrow amount of ${amount_dollars:,.0f}, 

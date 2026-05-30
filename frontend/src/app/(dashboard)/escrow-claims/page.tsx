@@ -218,8 +218,8 @@ export default function EscrowClaimsPage() {
     mutationFn: async (data: typeof formData) => {
       const payload = {
         ...data,
-        escrowAmount: parseFloat(data.escrowAmount) || 0,
-        paymentFee: parseFloat(data.paymentFee) || 0,
+        escrowAmount: parseInt(data.escrowAmount, 10) || 0,
+        paymentFee: parseInt(data.paymentFee, 10) || 0,
       }
       const { data: result } = await axios.post(`${API_URL}/escrow-claims`, payload, axiosConfig)
       return result
@@ -241,8 +241,8 @@ export default function EscrowClaimsPage() {
     mutationFn: async ({ id, data }: { id: string; data: typeof formData }) => {
       const payload = {
         ...data,
-        escrowAmount: parseFloat(data.escrowAmount) || 0,
-        paymentFee: parseFloat(data.paymentFee) || 0,
+        escrowAmount: parseInt(data.escrowAmount, 10) || 0,
+        paymentFee: parseInt(data.paymentFee, 10) || 0,
       }
       const { data: result } = await axios.put(`${API_URL}/escrow-claims/${id}`, payload, axiosConfig)
       return result
@@ -328,8 +328,8 @@ export default function EscrowClaimsPage() {
       city: claim.city || "",
       state: claim.state || "",
       zipCode: claim.zipCode || "",
-      escrowAmount: (claim.escrowAmount / 100).toString(),
-      paymentFee: ((claim.paymentFeeCents || 0) / 100).toString(),
+      escrowAmount: Math.floor(claim.escrowAmount / 100).toString(),
+      paymentFee: Math.floor((claim.paymentFeeCents || 0) / 100).toString(),
       escrowType: claim.escrowType,
       escrowDescription: claim.escrowDescription || "",
       originatingEntity: claim.originatingEntity || "",
@@ -347,10 +347,14 @@ export default function EscrowClaimsPage() {
   }
 
   const formatCurrency = (cents: number) => {
+    // Display whole dollars only — matches what the IVR speaks aloud.
+    // Use floor so the UI stays in sync with the agent's truncation.
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
-    }).format(cents / 100)
+      maximumFractionDigits: 0,
+      minimumFractionDigits: 0,
+    }).format(Math.floor(cents / 100))
   }
 
   const claims = claimsData?.claims || []
@@ -759,20 +763,22 @@ export default function EscrowClaimsPage() {
                 <Label>Escrow Amount ($) *</Label>
                 <Input
                   type="number"
-                  step="0.01"
+                  step="1"
+                  min="0"
                   value={formData.escrowAmount}
-                  onChange={(e) => setFormData(prev => ({ ...prev, escrowAmount: e.target.value }))}
-                  placeholder="10000.00"
+                  onChange={(e) => setFormData(prev => ({ ...prev, escrowAmount: e.target.value.replace(/\D/g, '') }))}
+                  placeholder="10000"
                 />
               </div>
               <div className="space-y-2">
                 <Label>Payment Fee ($)</Label>
                 <Input
                   type="number"
-                  step="0.01"
+                  step="1"
+                  min="0"
                   value={formData.paymentFee}
-                  onChange={(e) => setFormData(prev => ({ ...prev, paymentFee: e.target.value }))}
-                  placeholder="500.00"
+                  onChange={(e) => setFormData(prev => ({ ...prev, paymentFee: e.target.value.replace(/\D/g, '') }))}
+                  placeholder="500"
                 />
                 <p className="text-xs text-muted-foreground">Fee required to release funds (IVR will mention this)</p>
               </div>
