@@ -1,14 +1,15 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useParams } from "next/navigation"
+import { useParams, useSearchParams } from "next/navigation"
 import axios from "axios"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Video, Loader2, AlertCircle, PhoneOff, Camera, Mic } from "lucide-react"
+import { Video, Loader2, AlertCircle, PhoneOff, Camera, Mic, Bot } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { VideoRoom } from "@/components/video-call/VideoRoom"
+import { HeyGenAvatarRoom } from "@/components/video-call/HeyGenAvatarRoom"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"
 
@@ -20,11 +21,20 @@ interface JoinData {
   identity: string
 }
 
+interface HeyGenJoinData {
+  sessionToken: string
+  customerName: string
+  agentDisplayName: string
+}
+
 export default function VideoJoinPage() {
   const params = useParams<{ token: string }>()
+  const searchParams = useSearchParams()
   const joinToken = params?.token
+  const isHeyGenMode = searchParams?.get("mode") === "heygen"
 
   const [joinData, setJoinData] = useState<JoinData | null>(null)
+  const [heygenData, setHeygenData] = useState<HeyGenJoinData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [cameraEnabled, setCameraEnabled] = useState(true)
@@ -35,10 +45,17 @@ export default function VideoJoinPage() {
     if (!joinToken) return
     const fetchToken = async () => {
       try {
-        const { data } = await axios.get(
-          `${API_URL}/api/video-calls/customer/${joinToken}`
-        )
-        setJoinData(data)
+        if (isHeyGenMode) {
+          const { data } = await axios.get(
+            `${API_URL}/api/video-calls/heygen/customer/${joinToken}`
+          )
+          setHeygenData(data)
+        } else {
+          const { data } = await axios.get(
+            `${API_URL}/api/video-calls/customer/${joinToken}`
+          )
+          setJoinData(data)
+        }
       } catch (err: any) {
         setError(err.response?.data?.error || "Failed to load video call")
       } finally {
@@ -46,7 +63,7 @@ export default function VideoJoinPage() {
       }
     }
     fetchToken()
-  }, [joinToken])
+  }, [joinToken, isHeyGenMode])
 
   if (loading) {
     return (
@@ -59,7 +76,7 @@ export default function VideoJoinPage() {
     )
   }
 
-  if (error || !joinData) {
+  if (error || (!joinData && !heygenData)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background p-4">
         <Card className="max-w-md w-full">
@@ -80,7 +97,25 @@ export default function VideoJoinPage() {
     )
   }
 
-  if (inCall) {
+  if (inCall && heygenData) {
+    return (
+      <div className="fixed inset-0 z-50 bg-black">
+        <div className="absolute top-4 right-4 z-10">
+          <Button variant="destructive" size="sm" onClick={() => setInCall(false)}>
+            <PhoneOff className="mr-2 h-4 w-4" />
+            Leave Call
+          </Button>
+        </div>
+        <HeyGenAvatarRoom
+          sessionToken={heygenData.sessionToken}
+          agentDisplayName={heygenData.agentDisplayName}
+          onDisconnected={() => setInCall(false)}
+        />
+      </div>
+    )
+  }
+
+  if (inCall && joinData) {
     return (
       <div className="fixed inset-0 z-50 bg-black">
         <div className="absolute top-4 right-4 z-10">
@@ -109,31 +144,44 @@ export default function VideoJoinPage() {
           </div>
           <CardTitle className="text-center mt-4">Ready to Join?</CardTitle>
           <CardDescription className="text-center">
-            Hi <strong>{joinData.customerName}</strong>, you're about to join a video call.
+            Hi <strong>{joinData?.customerName || heygenData?.customerName}</strong>, you're about to join a {heygenData ? "video call with an AI avatar" : "video call"}.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex items-center justify-between rounded-lg border p-3">
-            <Label className="flex items-center gap-2 cursor-pointer">
-              <Camera className="h-4 w-4" />
-              Camera
-            </Label>
-            <Switch checked={cameraEnabled} onCheckedChange={setCameraEnabled} />
-          </div>
-          <div className="flex items-center justify-between rounded-lg border p-3">
-            <Label className="flex items-center gap-2 cursor-pointer">
-              <Mic className="h-4 w-4" />
-              Microphone
-            </Label>
-            <Switch checked={micEnabled} onCheckedChange={setMicEnabled} />
-          </div>
+          {heygenData && (
+            <div className="flex items-center gap-2 rounded-lg bg-primary/5 p-3 text-sm">
+              <Bot className="h-5 w-5 text-primary" />
+              <div>
+                <p className="font-medium">AI Avatar: {heygenData.agentDisplayName}</p>
+                <p className="text-xs text-muted-foreground">You'll speak with a lifelike AI agent</p>
+              </div>
+            </div>
+          )}
+          {joinData && (
+            <>
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <Label className="flex items-center gap-2 cursor-pointer">
+                  <Camera className="h-4 w-4" />
+                  Camera
+                </Label>
+                <Switch checked={cameraEnabled} onCheckedChange={setCameraEnabled} />
+              </div>
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <Label className="flex items-center gap-2 cursor-pointer">
+                  <Mic className="h-4 w-4" />
+                  Microphone
+                </Label>
+                <Switch checked={micEnabled} onCheckedChange={setMicEnabled} />
+              </div>
+            </>
+          )}
           <Button
             onClick={() => setInCall(true)}
             size="lg"
             className="w-full"
           >
-            <Video className="mr-2 h-5 w-5" />
-            Join Video Call
+            {heygenData ? <Bot className="mr-2 h-5 w-5" /> : <Video className="mr-2 h-5 w-5" />}
+            {heygenData ? "Join Avatar Call" : "Join Video Call"}
           </Button>
           <p className="text-xs text-center text-muted-foreground">
             Your camera and microphone access will be requested by the browser.

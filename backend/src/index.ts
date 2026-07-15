@@ -235,9 +235,9 @@ app.use('/api/didww', authMiddleware, didwwRoutes);
 app.use('/api/escrow-claims', authMiddleware, escrowClaimsRoutes);
 app.use('/api/admin', authMiddleware, adminRoutes);
 
-// Video calls — customer join endpoint is public, all other endpoints require auth
+// Video calls — customer join endpoints are public, all other endpoints require auth
 app.use('/api/video-calls', (req, res, next) => {
-  if (req.path.startsWith('/customer/')) return next();
+  if (req.path.startsWith('/customer/') || req.path.startsWith('/heygen/customer/')) return next();
   return authMiddleware(req as any, res, next);
 }, videoCallsRoutes);
 

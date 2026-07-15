@@ -9,6 +9,8 @@ const LIVEKIT_URL = process.env.LIVEKIT_URL || '';
 const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY || '';
 const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET || '';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+const HEYGEN_API_KEY = process.env.HEYGEN_API_KEY || process.env.LIVEAVATAR_API_KEY || '';
+const HEYGEN_API_BASE = process.env.HEYGEN_API_BASE || 'https://api.liveavatar.com';
 
 // In-memory store for customer join tokens (roomName -> { token, expiresAt, customerName })
 // In production, use Redis or DB for multi-instance deployments
@@ -17,11 +19,20 @@ const customerTokens = new Map<
   { roomName: string; customerName: string; expiresAt: number }
 >();
 
+// In-memory store for HeyGen session tokens (joinToken -> { sessionToken, customerName, expiresAt })
+const heygenSessions = new Map<
+  string,
+  { sessionToken: string; customerName: string; agentDisplayName: string; expiresAt: number }
+>();
+
 // Clean up expired tokens every 5 minutes
 setInterval(() => {
   const now = Date.now();
   for (const [token, data] of customerTokens.entries()) {
     if (data.expiresAt < now) customerTokens.delete(token);
+  }
+  for (const [token, data] of heygenSessions.entries()) {
+    if (data.expiresAt < now) heygenSessions.delete(token);
   }
 }, 5 * 60 * 1000);
 
@@ -183,6 +194,135 @@ router.post('/:roomName/end', async (req: AuthRequest, res: Response) => {
   } catch (error: any) {
     console.error('Error ending video call:', error);
     res.status(500).json({ error: error.message || 'Failed to end video call' });
+  }
+});
+
+// ─── HeyGen LiveAvatar endpoints ───
+
+// POST /api/video-calls/heygen/create
+// Mint a HeyGen LiveAvatar session token and return a customer join link
+router.post('/heygen/create', async (req: AuthRequest, res: Response) => {
+  try {
+    const organizationId = req.user?.organizationId;
+    const userId = req.user?.id;
+    if (!organizationId || !userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    if (!HEYGEN_API_KEY) {
+      return res.status(500).json({
+        error: 'HeyGen API key not configured. Set HEYGEN_API_KEY or LIVEAVATAR_API_KEY.',
+      });
+    }
+
+    const { customerName, customerPhone, agentDisplayName } = req.body;
+
+    if (!customerName) {
+      return res.status(400).json({ error: 'customerName is required' });
+    }
+
+    // Mint a HeyGen LiveAvatar session token
+    const tokenResponse = await fetch(`${HEYGEN_API_BASE}/v1/sessions/token`, {
+      method: 'POST',
+      headers: {
+        'X-API-KEY': HEYGEN_API_KEY,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!tokenResponse.ok) {
+      const errText = await tokenResponse.text();
+      console.error('HeyGen token request failed:', tokenResponse.status, errText);
+      return res.status(502).json({
+        error: `HeyGen API returned ${tokenResponse.status}: ${errText}`,
+      });
+    }
+
+    const tokenData: any = await tokenResponse.json();
+    const sessionToken = tokenData.data?.session_token;
+    if (!sessionToken) {
+      console.error('HeyGen token response missing session_token:', tokenData);
+      return res.status(502).json({ error: 'HeyGen API did not return a session token' });
+    }
+
+    // Generate customer join token
+    const customerJoinToken = crypto.randomBytes(24).toString('hex');
+    const expiresAt = Date.now() + 2 * 60 * 60 * 1000; // 2 hours
+    heygenSessions.set(customerJoinToken, {
+      sessionToken,
+      customerName,
+      agentDisplayName: agentDisplayName || 'AI Agent',
+      expiresAt,
+    });
+
+    const customerJoinUrl = `${FRONTEND_URL}/video-join/${customerJoinToken}?mode=heygen`;
+
+    res.json({
+      sessionToken,
+      customerJoinUrl,
+      customerJoinToken,
+      customerName,
+      agentDisplayName: agentDisplayName || 'AI Agent',
+      expiresAt,
+    });
+  } catch (error: any) {
+    console.error('Error creating HeyGen session:', error);
+    res.status(500).json({ error: error.message || 'Failed to create HeyGen session' });
+  }
+});
+
+// GET /api/video-calls/heygen/customer/:joinToken
+// Public endpoint: returns the HeyGen session token for a customer
+router.get('/heygen/customer/:joinToken', async (req: Request, res: Response) => {
+  try {
+    const { joinToken } = req.params;
+    const data = heygenSessions.get(joinToken);
+
+    if (!data) {
+      return res.status(404).json({ error: 'Invalid or expired join link' });
+    }
+
+    if (data.expiresAt < Date.now()) {
+      heygenSessions.delete(joinToken);
+      return res.status(410).json({ error: 'Join link has expired' });
+    }
+
+    res.json({
+      sessionToken: data.sessionToken,
+      customerName: data.customerName,
+      agentDisplayName: data.agentDisplayName,
+    });
+  } catch (error: any) {
+    console.error('Error fetching HeyGen session:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch HeyGen session' });
+  }
+});
+
+// POST /api/video-calls/heygen/:joinToken/end
+// End a HeyGen session by revoking the join token
+router.post('/heygen/:joinToken/end', async (req: AuthRequest, res: Response) => {
+  try {
+    const { joinToken } = req.params;
+    const data = heygenSessions.get(joinToken);
+
+    if (data && HEYGEN_API_KEY) {
+      // Attempt to end the HeyGen session via API
+      try {
+        await fetch(`${HEYGEN_API_BASE}/v1/sessions/${data.sessionToken}/end`, {
+          method: 'POST',
+          headers: { 'X-API-KEY': HEYGEN_API_KEY },
+        });
+      } catch (e) {
+        // Non-fatal - the SDK cleanup on the client side handles this
+        console.warn('Failed to end HeyGen session via API:', e);
+      }
+    }
+
+    heygenSessions.delete(joinToken);
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error ending HeyGen session:', error);
+    res.status(500).json({ error: error.message || 'Failed to end HeyGen session' });
   }
 });
 
