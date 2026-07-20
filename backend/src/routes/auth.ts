@@ -1,11 +1,19 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { hash, verify } from '@node-rs/argon2';
+import bcrypt from 'bcryptjs';
 import { eq } from 'drizzle-orm';
 import crypto from 'crypto';
 import { generateToken, verifyToken } from '../middleware/auth.js';
 import { db } from '../db/index.js';
 import { users, organizations } from '../db/schema.js';
+
+async function verifyPassword(passwordHash: string, password: string): Promise<boolean> {
+  if (passwordHash.startsWith('$2a$') || passwordHash.startsWith('$2b$') || passwordHash.startsWith('$2y$')) {
+    return bcrypt.compare(password, passwordHash);
+  }
+  return verify(passwordHash, password);
+}
 
 const router = Router();
 
@@ -119,8 +127,8 @@ router.post('/login', async (req: Request, res: Response) => {
       return;
     }
 
-    // Verify password
-    const valid = await verify(user.passwordHash, data.password);
+    // Verify password (supports both argon2 and bcrypt hashes)
+    const valid = await verifyPassword(user.passwordHash, data.password);
     if (!valid) {
       res.status(401).json({ error: 'Invalid credentials' });
       return;
@@ -131,9 +139,16 @@ router.post('/login', async (req: Request, res: Response) => {
       where: eq(organizations.id, user.organizationId),
     });
 
-    // Update last login
+    // Update last login — also upgrade bcrypt hashes to argon2
+    const updateData: { lastLoginAt: Date; passwordHash?: string; updatedAt?: Date } = {
+      lastLoginAt: new Date(),
+    };
+    if (user.passwordHash.startsWith('$2a$') || user.passwordHash.startsWith('$2b$') || user.passwordHash.startsWith('$2y$')) {
+      updateData.passwordHash = await hash(data.password);
+      updateData.updatedAt = new Date();
+    }
     await db.update(users)
-      .set({ lastLoginAt: new Date() })
+      .set(updateData)
       .where(eq(users.id, user.id));
 
     // Generate token
