@@ -23,6 +23,7 @@ Usage:
 import asyncio
 import os
 import time
+import json
 import numpy as np
 import cv2
 from pathlib import Path
@@ -333,15 +334,44 @@ async def entrypoint(ctx: JobContext):
 
     await ctx.connect(auto_subscribe=AutoSubscribe.VIDEO_ONLY)
 
+    # Check room metadata for a custom face image path
+    room_metadata = {}
+    try:
+        if ctx.room.metadata:
+            room_metadata = json.loads(ctx.room.metadata)
+    except Exception:
+        pass
+
+    custom_face_path = room_metadata.get("faceImagePath")
+    enable_face_swap = room_metadata.get("enableFaceSwap", False)
+
+    if not enable_face_swap:
+        logger.info("Face swap not enabled for this room, agent will not process video")
+        return
+
+    # Determine which face image to use
+    face_path = custom_face_path or SOURCE_FACE_PATH
+    logger.info(f"Using face image: {face_path}")
+
     # Use pre-warmed processor or create new one
-    processor = ctx.proc.userdata.get("processor")
-    if not processor:
+    # If a custom face is specified, create a new processor with that face
+    if custom_face_path and custom_face_path != SOURCE_FACE_PATH:
+        logger.info(f"Loading custom face image: {custom_face_path}")
         processor = FaceSwapProcessor(
             model_path=MODEL_PATH,
-            source_face_path=SOURCE_FACE_PATH,
+            source_face_path=face_path,
             enhancer_path=FACE_ENHANCER_PATH if ENABLE_FACE_ENHANCER else None,
         )
         processor.initialize()
+    else:
+        processor = ctx.proc.userdata.get("processor")
+        if not processor:
+            processor = FaceSwapProcessor(
+                model_path=MODEL_PATH,
+                source_face_path=face_path,
+                enhancer_path=FACE_ENHANCER_PATH if ENABLE_FACE_ENHANCER else None,
+            )
+            processor.initialize()
 
     agent = FaceSwapVideoAgent(processor)
     await agent.start(ctx)

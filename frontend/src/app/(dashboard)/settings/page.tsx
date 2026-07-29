@@ -43,6 +43,9 @@ import {
   CheckCircle,
   XCircle,
   Plug,
+  Bot,
+  Square,
+  RefreshCw,
 } from "lucide-react"
 import { useState, useEffect, useMemo } from "react"
 import { useAuthStore } from "@/stores/auth-store"
@@ -711,6 +714,8 @@ const TELEPHONY_PROVIDERS = [
   { id: 'vonage', name: 'Vonage', fields: ['accountSid', 'authToken'] },
   { id: 'signalwire', name: 'SignalWire', fields: ['accountSid', 'authToken', 'spaceUrl'] },
   { id: 'livekit_sip', name: 'LiveKit SIP', fields: ['sipUri'] },
+  { id: 'custom_sip', name: 'Custom SIP (Bring Your Own Carrier)', fields: ['sipHost', 'sipUsername', 'sipPassword'] },
+  { id: 'skytelecom', name: 'SkyTelecom', fields: ['sipUsername', 'sipPassword', 'skytelecomApiKey'] },
   { id: 'vogent', name: 'Vogent', fields: ['apiKey', 'vogentBaseAgentId', 'vogentPhoneNumberId', 'vogentDefaultModelId'] },
 ] as const
 
@@ -726,6 +731,13 @@ interface TelephonyConfig {
   vogentBaseAgentId: string | null
   vogentPhoneNumberId: string | null
   vogentDefaultModelId: string | null
+  customSipHost: string | null
+  customSipUsername: string | null
+  customSipTransport: string | null
+  customSipNumbers: string[]
+  livekitOutboundTrunkId: string | null
+  hasCustomSipPassword: boolean
+  hasSkytelecomApiKey: boolean
 }
 
 function TelephonySettings({ token, isHydrated }: { token: string | null; isHydrated: boolean }) {
@@ -738,6 +750,12 @@ function TelephonySettings({ token, isHydrated }: { token: string | null; isHydr
   const [vogentBaseAgentId, setVogentBaseAgentId] = useState('')
   const [vogentPhoneNumberId, setVogentPhoneNumberId] = useState('')
   const [vogentDefaultModelId, setVogentDefaultModelId] = useState('')
+  const [sipHost, setSipHost] = useState('')
+  const [sipUsername, setSipUsername] = useState('')
+  const [sipPassword, setSipPassword] = useState('')
+  const [sipTransport, setSipTransport] = useState<'auto' | 'udp' | 'tcp' | 'tls'>('auto')
+  const [sipNumbersText, setSipNumbersText] = useState('')
+  const [skytelecomApiKey, setSkytelecomApiKey] = useState('')
   const [showAuthToken, setShowAuthToken] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   
@@ -759,6 +777,12 @@ function TelephonySettings({ token, isHydrated }: { token: string | null; isHydr
   useEffect(() => {
     if (telephonyData?.configured && telephonyData.provider) {
       setSelectedProvider(telephonyData.provider)
+      if (telephonyData.provider === 'custom_sip' || telephonyData.provider === 'skytelecom') {
+        if (telephonyData.customSipHost) setSipHost(telephonyData.customSipHost)
+        if (telephonyData.customSipUsername) setSipUsername(telephonyData.customSipUsername)
+        if (telephonyData.customSipTransport) setSipTransport(telephonyData.customSipTransport as any)
+        if (telephonyData.customSipNumbers?.length) setSipNumbersText(telephonyData.customSipNumbers.join(', '))
+      }
     }
   }, [telephonyData])
 
@@ -774,6 +798,12 @@ function TelephonySettings({ token, isHydrated }: { token: string | null; isHydr
       vogentBaseAgentId?: string
       vogentPhoneNumberId?: string
       vogentDefaultModelId?: string
+      sipHost?: string
+      sipUsername?: string
+      sipPassword?: string
+      sipTransport?: string
+      sipNumbers?: string[]
+      skytelecomApiKey?: string
     }) => {
       const response = await axios.post(
         `${API_URL}/settings/telephony`,
@@ -794,6 +824,8 @@ function TelephonySettings({ token, isHydrated }: { token: string | null; isHydr
       setVogentBaseAgentId('')
       setVogentPhoneNumberId('')
       setVogentDefaultModelId('')
+      setSipPassword('')
+      setSkytelecomApiKey('')
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.error || 'Failed to save telephony configuration')
@@ -832,6 +864,43 @@ function TelephonySettings({ token, isHydrated }: { token: string | null; isHydr
           return
         }
         data.sipUri = sipUri
+      } else if (selectedProvider === 'custom_sip') {
+        if (!sipHost || !sipUsername) {
+          toast.error('SIP host and username are required')
+          return
+        }
+        // On first setup a password is mandatory; afterwards a blank field
+        // keeps the previously stored credential.
+        if (!sipPassword && !telephonyData?.hasCustomSipPassword) {
+          toast.error('SIP password is required')
+          return
+        }
+        data.sipHost = sipHost.trim()
+        data.sipUsername = sipUsername.trim()
+        if (sipPassword) data.sipPassword = sipPassword
+        data.sipTransport = sipTransport
+        data.sipNumbers = sipNumbersText
+          .split(',')
+          .map((n) => n.trim())
+          .filter(Boolean)
+      } else if (selectedProvider === 'skytelecom') {
+        if (!sipUsername) {
+          toast.error('SIP username (extension) is required')
+          return
+        }
+        if (!sipPassword && !telephonyData?.hasCustomSipPassword) {
+          toast.error('SIP password is required')
+          return
+        }
+        data.sipHost = sipHost.trim() || 'connect.skytelecom.io:5060'
+        data.sipUsername = sipUsername.trim()
+        if (sipPassword) data.sipPassword = sipPassword
+        data.sipTransport = sipTransport
+        data.sipNumbers = sipNumbersText
+          .split(',')
+          .map((n) => n.trim())
+          .filter(Boolean)
+        if (skytelecomApiKey) data.skytelecomApiKey = skytelecomApiKey
       } else if (selectedProvider === 'vogent') {
         if (!apiKey) {
           toast.error('Vogent API Key is required')
@@ -1025,6 +1094,198 @@ function TelephonySettings({ token, isHydrated }: { token: string | null; isHydr
                 </div>
               )}
 
+              {selectedProvider === 'custom_sip' && (
+                <>
+                  <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                    <p className="text-xs text-blue-700">
+                      Connect your own SIP carrier (Twilio Elastic SIP Trunking, SignalWire, Telnyx,
+                      Bandwidth, Plivo, or any SIP provider). A dedicated trunk is provisioned for your
+                      organization, and all outbound calls are placed over your carrier and billed to your account.
+                    </p>
+                  </div>
+                  {telephonyData?.provider === 'custom_sip' && telephonyData.livekitOutboundTrunkId && (
+                    <p className="text-xs text-muted-foreground">
+                      Provisioned trunk: <span className="font-mono">{telephonyData.livekitOutboundTrunkId}</span>
+                    </p>
+                  )}
+                  <div className="space-y-2">
+                    <Label htmlFor="sipHost">SIP Host / Termination Domain</Label>
+                    <Input
+                      id="sipHost"
+                      placeholder="your-trunk.pstn.twilio.com"
+                      value={sipHost}
+                      onChange={(e) => setSipHost(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">The termination SIP URI host from your carrier, without the leading sip:</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="sipUsername">SIP Username</Label>
+                    <Input
+                      id="sipUsername"
+                      placeholder="trunk-username"
+                      value={sipUsername}
+                      onChange={(e) => setSipUsername(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="sipPassword">SIP Password</Label>
+                    <div className="relative">
+                      <Input
+                        id="sipPassword"
+                        type={showAuthToken ? 'text' : 'password'}
+                        placeholder={telephonyData?.hasCustomSipPassword ? 'Saved — leave blank to keep current password' : '••••••••••••••••'}
+                        value={sipPassword}
+                        onChange={(e) => setSipPassword(e.target.value)}
+                        className="pr-10"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="absolute right-0 top-0 h-full px-3"
+                        onClick={() => setShowAuthToken(!showAuthToken)}
+                      >
+                        {showAuthToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Transport</Label>
+                    <Select value={sipTransport} onValueChange={(v) => setSipTransport(v as any)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="auto">Auto</SelectItem>
+                        <SelectItem value="udp">UDP</SelectItem>
+                        <SelectItem value="tcp">TCP</SelectItem>
+                        <SelectItem value="tls">TLS</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="sipNumbers">Your Phone Numbers</Label>
+                    <Input
+                      id="sipNumbers"
+                      placeholder="+15551234567, +15559876543"
+                      value={sipNumbersText}
+                      onChange={(e) => setSipNumbersText(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">Comma-separated E.164 numbers you own on this carrier. The first is used as the default caller ID.</p>
+                  </div>
+                </>
+              )}
+
+              {selectedProvider === 'skytelecom' && (
+                <>
+                  <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                    <p className="text-xs text-blue-700">
+                      SkyTelecom provides SIP-based outbound calling with custom Caller ID support.
+                      A dedicated LiveKit trunk is provisioned to bridge calls through SkyTelecom's
+                      network (connect.skytelecom.io). Enter your SIP extension and password from
+                      your SkyTelecom dashboard, plus your REST API key for SMS and account features.
+                    </p>
+                  </div>
+                  {telephonyData?.provider === 'skytelecom' && telephonyData.livekitOutboundTrunkId && (
+                    <p className="text-xs text-muted-foreground">
+                      Provisioned trunk: <span className="font-mono">{telephonyData.livekitOutboundTrunkId}</span>
+                    </p>
+                  )}
+                  <div className="space-y-2">
+                    <Label htmlFor="skytelecomApiKey">REST API Key (for SMS & balance)</Label>
+                    <div className="relative">
+                      <Input
+                        id="skytelecomApiKey"
+                        type={showAuthToken ? 'text' : 'password'}
+                        placeholder={telephonyData?.hasSkytelecomApiKey ? 'Saved — leave blank to keep current key' : '13048|...'}
+                        value={skytelecomApiKey}
+                        onChange={(e) => setSkytelecomApiKey(e.target.value)}
+                        className="pr-10"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="absolute right-0 top-0 h-full px-3"
+                        onClick={() => setShowAuthToken(!showAuthToken)}
+                      >
+                        {showAuthToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">Found in your SkyTelecom dashboard under API settings.</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="skySipUsername">SIP Username (Extension)</Label>
+                    <Input
+                      id="skySipUsername"
+                      placeholder="67814"
+                      value={sipUsername}
+                      onChange={(e) => setSipUsername(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">Your SIP extension number from SkyTelecom. This is used as the SIP From user for authentication.</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="skySipPassword">SIP Password</Label>
+                    <div className="relative">
+                      <Input
+                        id="skySipPassword"
+                        type={showAuthToken ? 'text' : 'password'}
+                        placeholder={telephonyData?.hasCustomSipPassword ? 'Saved — leave blank to keep current password' : '••••••••••••••••'}
+                        value={sipPassword}
+                        onChange={(e) => setSipPassword(e.target.value)}
+                        className="pr-10"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="absolute right-0 top-0 h-full px-3"
+                        onClick={() => setShowAuthToken(!showAuthToken)}
+                      >
+                        {showAuthToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="skySipHost">SIP Host (optional — defaults to connect.skytelecom.io:5060)</Label>
+                    <Input
+                      id="skySipHost"
+                      placeholder="connect.skytelecom.io:5060"
+                      value={sipHost}
+                      onChange={(e) => setSipHost(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Transport</Label>
+                    <Select value={sipTransport} onValueChange={(v) => setSipTransport(v as any)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="auto">Auto</SelectItem>
+                        <SelectItem value="udp">UDP</SelectItem>
+                        <SelectItem value="tcp">TCP</SelectItem>
+                        <SelectItem value="tls">TLS</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="skySipNumbers">SIP From / Caller ID Numbers</Label>
+                    <Input
+                      id="skySipNumbers"
+                      placeholder="67814, +18888331297"
+                      value={sipNumbersText}
+                      onChange={(e) => setSipNumbersText(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Comma-separated. For Asterisk-based carriers like SkyTelecom, the first entry should be your SIP extension
+                      (e.g. <span className="font-mono">67814</span>) to match the auth username. Add your registered caller ID
+                      (e.g. <span className="font-mono">+18888331297</span>) as the second entry.
+                    </p>
+                  </div>
+                </>
+              )}
+
               {selectedProvider === 'vogent' && (
                 <>
                   <div className="space-y-2">
@@ -1098,12 +1359,15 @@ function TelephonySettings({ token, isHydrated }: { token: string | null; isHydr
       </Card>
 
       {/* Import Phone Numbers from Provider */}
-      {telephonyData?.configured && telephonyData.provider && telephonyData.provider !== 'livekit_sip' && (
+      {telephonyData?.configured && telephonyData.provider && telephonyData.provider !== 'livekit_sip' && telephonyData.provider !== 'custom_sip' && telephonyData.provider !== 'skytelecom' && (
         <ProviderPhoneImport token={token} isHydrated={isHydrated} provider={telephonyData.provider} />
       )}
 
       {/* LiveKit Telephony Management */}
       <LiveKitTelephony token={token} isHydrated={isHydrated} />
+
+      {/* Voice Agent Runtime */}
+      <AgentRuntimeControl token={token} isHydrated={isHydrated} />
     </TabsContent>
   )
 }
@@ -1415,6 +1679,130 @@ interface LiveKitPhoneNumber {
   status?: string
   capabilities?: string[]
   sip_dispatch_rule_ids?: string[]
+}
+
+function AgentRuntimeControl({ token, isHydrated }: { token: string | null; isHydrated: boolean }) {
+  const [showLogs, setShowLogs] = useState(false)
+
+  const { data: status, refetch } = useQuery({
+    queryKey: ['agent-runtime-status'],
+    queryFn: async () => {
+      const res = await axios.get(`${API_URL}/agent-runtime/status`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      return res.data as { running: boolean; pid: number | null; logs: string[] }
+    },
+    enabled: isHydrated && !!token,
+    refetchInterval: 5000,
+  })
+
+  const startMutation = useMutation({
+    mutationFn: async () => {
+      const res = await axios.post(`${API_URL}/agent-runtime/start`, {}, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      return res.data
+    },
+    onSuccess: (data) => {
+      if (data.alreadyRunning) toast.info(`Agent already running (pid ${data.pid})`)
+      else toast.success(`Agent started (pid ${data.pid})`)
+      refetch()
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error || 'Failed to start agent'),
+  })
+
+  const stopMutation = useMutation({
+    mutationFn: async () => {
+      const res = await axios.post(`${API_URL}/agent-runtime/stop`, {}, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      return res.data
+    },
+    onSuccess: () => {
+      toast.success('Agent stopped')
+      refetch()
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error || 'Failed to stop agent'),
+  })
+
+  const isPending = startMutation.isPending || stopMutation.isPending
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Bot className="h-5 w-5" />
+          Voice Agent Runtime
+        </CardTitle>
+        <CardDescription>
+          The local Python agent (agent.py) that joins LiveKit rooms and handles calls. It must be running for calls to work.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium">Status:</span>
+            {status?.running ? (
+              <Badge className="bg-green-500/10 text-green-600 border-green-500/20">
+                Running (pid {status.pid})
+              </Badge>
+            ) : (
+              <Badge className="bg-red-500/10 text-red-600 border-red-500/20">
+                Not Running
+              </Badge>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refetch()}
+              disabled={isPending}
+            >
+              <RefreshCw className="h-4 w-4 mr-1" />
+              Refresh
+            </Button>
+            {status?.running ? (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => stopMutation.mutate()}
+                disabled={isPending}
+              >
+                {stopMutation.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Square className="h-4 w-4 mr-1" />}
+                Stop Agent
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                onClick={() => startMutation.mutate()}
+                disabled={isPending}
+              >
+                {startMutation.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Bot className="h-4 w-4 mr-1" />}
+                Start Agent
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {status?.logs && status.logs.length > 0 && (
+          <div>
+            <button
+              className="text-xs text-muted-foreground hover:text-foreground underline"
+              onClick={() => setShowLogs(!showLogs)}
+            >
+              {showLogs ? 'Hide logs' : `Show logs (${status.logs.length})`}
+            </button>
+            {showLogs && (
+              <pre className="mt-2 p-3 bg-muted rounded-lg text-xs font-mono max-h-64 overflow-auto whitespace-pre-wrap">
+                {status.logs.join('\n')}
+              </pre>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
 }
 
 function LiveKitTelephony({ token, isHydrated }: { token: string | null; isHydrated: boolean }) {

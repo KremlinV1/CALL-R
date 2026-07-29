@@ -422,23 +422,41 @@ router.post('/outbound', async (req: AuthRequest, res: Response) => {
     
     // Determine provider: use requested provider or check org config, default to livekit
     let callProvider: 'livekit' | 'telnyx' = 'livekit';
+    let orgTrunkId: string | null = null;   // BYOK: org's own provisioned trunk
+    let orgSipNumbers: string[] = [];        // BYOK: caller IDs the org owns
+    
+    // Always load the org's telephony config so BYOK applies to every caller
+    // (direct API calls and the campaign executor alike).
+    const configResult = await db
+      .select()
+      .from(telephonyConfig)
+      .where(eq(telephonyConfig.organizationId, organizationId))
+      .limit(1);
+    const orgTelephony = configResult[0] || null;
+    
     if (requestedProvider === 'telnyx' || requestedProvider === 'livekit') {
       callProvider = requestedProvider;
-    } else {
-      // Check org telephony config
-      const configResult = await db
-        .select()
-        .from(telephonyConfig)
-        .where(eq(telephonyConfig.organizationId, organizationId))
-        .limit(1);
-      if (configResult.length > 0 && configResult[0].provider === 'telnyx') {
-        callProvider = 'telnyx';
-      }
+    } else if (orgTelephony?.provider === 'telnyx') {
+      callProvider = 'telnyx';
     }
     
+    // BYOK: route through the org's own carrier via its dedicated LiveKit trunk
+    // Handles both generic Custom SIP and the named SkyTelecom provider
+    if (orgTelephony?.provider === 'custom_sip' || orgTelephony?.provider === 'skytelecom') {
+      if (!orgTelephony.livekitOutboundTrunkId) {
+        return res.status(400).json({ error: `${orgTelephony.provider === 'skytelecom' ? 'SkyTelecom' : 'Custom SIP'} is selected but no trunk is provisioned. Re-save your settings.` });
+      }
+      callProvider = 'livekit';
+      orgTrunkId = orgTelephony.livekitOutboundTrunkId;
+      orgSipNumbers = orgTelephony.customSipNumbers || [];
+    }
+    
+    // Per-org BYOK trunk takes precedence over the platform-wide trunk
+    const effectiveTrunkId = orgTrunkId || LIVEKIT_SIP_TRUNK_OUTBOUND;
+    
     // Validate provider is configured
-    if (callProvider === 'livekit' && !(LIVEKIT_URL && LIVEKIT_API_KEY && LIVEKIT_SIP_TRUNK_OUTBOUND)) {
-      return res.status(400).json({ error: 'LiveKit SIP trunk not configured. Set LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_SIP_TRUNK_OUTBOUND.' });
+    if (callProvider === 'livekit' && !(LIVEKIT_URL && LIVEKIT_API_KEY && effectiveTrunkId)) {
+      return res.status(400).json({ error: 'No SIP trunk configured. Set LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_SIP_TRUNK_OUTBOUND, or configure Custom SIP (BYOK) in Settings.' });
     }
     if (callProvider === 'telnyx' && !TELNYX_API_KEY) {
       return res.status(400).json({ error: 'Telnyx not configured. Set TELNYX_API_KEY and TELNYX_CONNECTION_ID.' });
@@ -494,6 +512,17 @@ router.post('/outbound', async (req: AuthRequest, res: Response) => {
       }
     } catch (cidErr: any) {
       console.warn('⚠️ Caller ID resolution failed, using raw fromNumber:', cidErr.message);
+    }
+
+    // BYOK: when calling through the org's own carrier trunk, the trunk's
+    // numbers act as the SIP From user. Many carriers (e.g. Asterisk-based)
+    // require the From user to match the SIP auth username, so pass the BYOK
+    // value through verbatim — do not E.164-normalize it.
+    if (orgTrunkId && orgSipNumbers.length > 0) {
+      if (!orgSipNumbers.includes(fromNumber)) {
+        fromNumber = orgSipNumbers[0];
+        console.log(`📞 Using BYOK trunk From: ${fromNumber} (carrier-registered)`);
+      }
     }
 
     // Final fallback: use DEFAULT_FROM_NUMBER env var (e.g. org toll-free number)
@@ -594,7 +623,8 @@ router.post('/outbound', async (req: AuthRequest, res: Response) => {
         console.log('🔧 LiveKit config:', {
           hasApiKey: !!LIVEKIT_API_KEY,
           hasApiSecret: !!LIVEKIT_API_SECRET,
-          trunkId: LIVEKIT_SIP_TRUNK_OUTBOUND,
+          trunkId: effectiveTrunkId,
+          byok: !!orgTrunkId,
           url: LIVEKIT_URL,
         });
         
@@ -639,13 +669,14 @@ router.post('/outbound', async (req: AuthRequest, res: Response) => {
         }
         
         console.log('📞 Creating SIP participant:', {
-          trunkId: LIVEKIT_SIP_TRUNK_OUTBOUND,
+          trunkId: effectiveTrunkId,
+          byok: !!orgTrunkId,
           toNumber: formattedToNumber,
           roomName,
         });
         
         const sipResult = await sipClient.createSipParticipant(
-          LIVEKIT_SIP_TRUNK_OUTBOUND!,
+          effectiveTrunkId!,
           formattedToNumber,
           roomName,
           {

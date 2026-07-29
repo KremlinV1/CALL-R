@@ -186,6 +186,21 @@ async function sendSms(config: ChannelConfig, event: NotificationEvent): Promise
     return { status: res.status };
   }
 
+  if (provider === 'skytelecom') {
+    const apiKey = config.apiKey || process.env.SKYTELECOM_API_KEY;
+    if (!apiKey) throw new Error('SkyTelecom API key not configured');
+
+    const res = await axios.post('https://api.skytelecom.io/v1/sms/send', {
+      to: toNumber,
+      from: config.fromNumber,
+      text: `${event.title}: ${event.message}`,
+    }, {
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      timeout: 10000,
+    });
+    return { status: res.status };
+  }
+
   throw new Error(`Unsupported SMS provider: ${provider}`);
 }
 

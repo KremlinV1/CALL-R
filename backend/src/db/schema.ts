@@ -280,7 +280,7 @@ export const aiProviderKeys = pgTable('ai_provider_keys', {
 });
 
 // Telephony Provider Configuration
-export const telephonyProviderEnum = pgEnum('telephony_provider', ['livekit_sip', 'telnyx']);
+export const telephonyProviderEnum = pgEnum('telephony_provider', ['livekit_sip', 'telnyx', 'custom_sip', 'skytelecom']);
 
 export const telephonyConfig = pgTable('telephony_config', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -306,7 +306,18 @@ export const telephonyConfig = pgTable('telephony_config', {
   
   // SignalWire specific - Space URL (e.g., "myspace" for myspace.signalwire.com) (legacy/ununsed in LiveKit-only)
   signalwireSpaceUrl: varchar('signalwire_space_url', { length: 255 }),
-  
+
+  // Custom SIP (BYOK) - the organization's own carrier / SIP trunk
+  customSipHost: varchar('custom_sip_host', { length: 255 }),           // e.g. sip.twilio.com, myspace.sip.signalwire.com
+  customSipUsername: varchar('custom_sip_username', { length: 100 }),
+  encryptedCustomSipPassword: text('encrypted_custom_sip_password'),
+  customSipTransport: varchar('custom_sip_transport', { length: 10 }).default('auto'), // auto | udp | tcp | tls
+  customSipNumbers: jsonb('custom_sip_numbers').$type<string[]>(),      // caller IDs the org owns on their carrier
+  livekitOutboundTrunkId: varchar('livekit_outbound_trunk_id', { length: 100 }), // LiveKit trunk provisioned for this org
+
+  // SkyTelecom specific - REST API key for SMS, balance checks, CDR retrieval
+  encryptedSkytelecomApiKey: text('encrypted_skytelecom_api_key'),
+
   isConfigured: boolean('is_configured').default(false),
   lastVerifiedAt: timestamp('last_verified_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),

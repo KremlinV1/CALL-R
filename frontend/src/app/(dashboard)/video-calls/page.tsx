@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
-import { Video, Copy, PhoneOff, Users, Sparkles, Loader2, Bot } from "lucide-react"
+import { Video, Copy, PhoneOff, Users, Sparkles, Loader2, Bot, Upload, X } from "lucide-react"
 import { toast } from "sonner"
 import axios from "axios"
 import { VideoRoom } from "@/components/video-call/VideoRoom"
@@ -45,6 +45,9 @@ export default function VideoCallsPage() {
     user ? `${user.firstName} ${user.lastName}` : ""
   )
   const [enableFaceSwap, setEnableFaceSwap] = useState(false)
+  const [faceImagePath, setFaceImagePath] = useState<string | null>(null)
+  const [facePreview, setFacePreview] = useState<string | null>(null)
+  const [uploadingFace, setUploadingFace] = useState(false)
   const [callMode, setCallMode] = useState<CallMode>("livekit")
   const [session, setSession] = useState<VideoCallSession | null>(null)
   const [heygenSession, setHeygenSession] = useState<HeyGenSession | null>(null)
@@ -54,6 +57,10 @@ export default function VideoCallsPage() {
   const createCall = async () => {
     if (!customerName.trim()) {
       toast.error("Please enter a customer name")
+      return
+    }
+    if (callMode === "livekit" && enableFaceSwap && !faceImagePath) {
+      toast.error("Please upload a target face image for face swap")
       return
     }
     setLoading(true)
@@ -78,6 +85,7 @@ export default function VideoCallsPage() {
             customerPhone,
             agentDisplayName,
             enableFaceSwap,
+            faceImagePath,
           },
           { headers: { Authorization: `Bearer ${token}` } }
         )
@@ -96,6 +104,51 @@ export default function VideoCallsPage() {
     if (!url) return
     await navigator.clipboard.writeText(url)
     toast.success("Customer link copied to clipboard")
+  }
+
+  const handleFaceUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please select an image file")
+      return
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error("Image must be under 10MB")
+      return
+    }
+
+    setUploadingFace(true)
+    try {
+      const reader = new FileReader()
+      reader.onload = async () => {
+        const base64 = reader.result as string
+        setFacePreview(base64)
+        try {
+          const { data } = await axios.post(
+            `${API_URL}/api/video-calls/upload-face`,
+            { image: base64 },
+            { headers: { Authorization: `Bearer ${token}` } }
+          )
+          setFaceImagePath(data.faceImagePath)
+          toast.success("Target face uploaded successfully")
+        } catch (error: any) {
+          toast.error(error.response?.data?.error || "Failed to upload face image")
+          setFacePreview(null)
+        } finally {
+          setUploadingFace(false)
+        }
+      }
+      reader.readAsDataURL(file)
+    } catch (error) {
+      toast.error("Failed to read image file")
+      setUploadingFace(false)
+    }
+  }
+
+  const removeFace = () => {
+    setFaceImagePath(null)
+    setFacePreview(null)
   }
 
   const joinCall = () => {
@@ -280,6 +333,64 @@ export default function VideoCallsPage() {
                   </p>
                 </div>
                 <Switch checked={enableFaceSwap} onCheckedChange={setEnableFaceSwap} />
+              </div>
+            )}
+            {callMode === "livekit" && enableFaceSwap && (
+              <div className="space-y-3 rounded-lg border border-purple-500/20 bg-purple-500/5 p-4">
+                <div className="space-y-1">
+                  <Label className="flex items-center gap-2">
+                    <Upload className="h-4 w-4 text-purple-600" />
+                    Target Face Image
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Upload a clear front-facing photo of the face you want to appear on the call.
+                    Use a well-lit photo for best results.
+                  </p>
+                </div>
+                {facePreview ? (
+                  <div className="relative inline-block">
+                    <img
+                      src={facePreview}
+                      alt="Target face preview"
+                      className="h-32 w-32 rounded-lg object-cover border-2 border-purple-500/30"
+                    />
+                    <button
+                      type="button"
+                      onClick={removeFace}
+                      className="absolute -top-2 -right-2 rounded-full bg-red-500 p-1 text-white shadow-lg hover:bg-red-600"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <label
+                    htmlFor="face-upload"
+                    className="flex h-32 w-32 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-purple-500/30 hover:border-purple-500/50 hover:bg-purple-500/10 transition-colors"
+                  >
+                    {uploadingFace ? (
+                      <Loader2 className="h-6 w-6 animate-spin text-purple-600" />
+                    ) : (
+                      <>
+                        <Upload className="h-6 w-6 text-purple-600 mb-1" />
+                        <span className="text-xs text-purple-600">Upload Face</span>
+                      </>
+                    )}
+                    <input
+                      id="face-upload"
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleFaceUpload}
+                      disabled={uploadingFace}
+                    />
+                  </label>
+                )}
+                {faceImagePath && (
+                  <p className="text-xs text-green-600 flex items-center gap-1">
+                    <Sparkles className="h-3 w-3" />
+                    Face image ready: {faceImagePath}
+                  </p>
+                )}
               </div>
             )}
             <Button

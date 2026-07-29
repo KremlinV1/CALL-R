@@ -3,6 +3,7 @@ import { db } from '../db/index.js';
 import { aiProviderKeys, telephonyConfig, organizations, phoneNumbers } from '../db/schema.js';
 import { eq, and } from 'drizzle-orm';
 import { encryptApiKey, decryptApiKey } from '../utils/crypto.js';
+import { livekitService } from '../services/livekit.js';
 
 const router = Router();
 
@@ -348,8 +349,20 @@ async function updateAgentEnvFile(provider: Provider, apiKey: string): Promise<v
 // TELEPHONY PROVIDER ROUTES
 // ============================================
 
-const TELEPHONY_PROVIDERS = ['livekit_sip', 'telnyx'] as const;
+const TELEPHONY_PROVIDERS = ['livekit_sip', 'telnyx', 'custom_sip', 'skytelecom'] as const;
 type TelephonyProvider = typeof TELEPHONY_PROVIDERS[number];
+
+const SIP_TRANSPORTS = ['auto', 'udp', 'tcp', 'tls'] as const;
+type SipTransport = typeof SIP_TRANSPORTS[number];
+
+// LiveKit SIPTransport enum values
+const SIP_TRANSPORT_MAP: Record<SipTransport, number> = { auto: 0, udp: 1, tcp: 2, tls: 3 };
+
+// SkyTelecom pre-configured defaults
+const SKYTELECOM_DEFAULTS = {
+  sipHost: 'connect.skytelecom.io:5060',
+  sipTransport: 'auto' as SipTransport,
+};
 
 interface TelephonyConfigRequest {
   provider: TelephonyProvider;
@@ -362,6 +375,14 @@ interface TelephonyConfigRequest {
   telnyxConnectionId?: string;
   telnyxSipUsername?: string;
   telnyxSipPassword?: string;
+  // Custom SIP (BYOK) specific
+  sipHost?: string;
+  sipUsername?: string;
+  sipPassword?: string;
+  sipTransport?: SipTransport;
+  sipNumbers?: string[];
+  // SkyTelecom specific
+  skytelecomApiKey?: string;
 }
 
 // GET /api/settings/telephony - Get telephony configuration
@@ -382,6 +403,13 @@ router.get('/telephony', async (req: Request, res: Response) => {
         signalwireSpaceUrl: telephonyConfig.signalwireSpaceUrl,
         telnyxConnectionId: telephonyConfig.telnyxConnectionId,
         telnyxSipUsername: telephonyConfig.telnyxSipUsername,
+        customSipHost: telephonyConfig.customSipHost,
+        customSipUsername: telephonyConfig.customSipUsername,
+        customSipTransport: telephonyConfig.customSipTransport,
+        customSipNumbers: telephonyConfig.customSipNumbers,
+        livekitOutboundTrunkId: telephonyConfig.livekitOutboundTrunkId,
+        encryptedCustomSipPassword: telephonyConfig.encryptedCustomSipPassword,
+        encryptedSkytelecomApiKey: telephonyConfig.encryptedSkytelecomApiKey,
         isConfigured: telephonyConfig.isConfigured,
         lastVerifiedAt: telephonyConfig.lastVerifiedAt,
         updatedAt: telephonyConfig.updatedAt,
@@ -408,6 +436,14 @@ router.get('/telephony', async (req: Request, res: Response) => {
       signalwireSpaceUrl: config[0].signalwireSpaceUrl,
       telnyxConnectionId: config[0].telnyxConnectionId,
       telnyxSipUsername: config[0].telnyxSipUsername,
+      customSipHost: config[0].customSipHost,
+      customSipUsername: config[0].customSipUsername,
+      customSipTransport: config[0].customSipTransport,
+      customSipNumbers: config[0].customSipNumbers || [],
+      livekitOutboundTrunkId: config[0].livekitOutboundTrunkId,
+      // never return the secret itself — only whether one is stored
+      hasCustomSipPassword: !!config[0].encryptedCustomSipPassword,
+      hasSkytelecomApiKey: !!config[0].encryptedSkytelecomApiKey,
       lastVerifiedAt: config[0].lastVerifiedAt,
       updatedAt: config[0].updatedAt,
     });
@@ -421,7 +457,7 @@ router.get('/telephony', async (req: Request, res: Response) => {
 router.post('/telephony', async (req: Request, res: Response) => {
   try {
     const organizationId = (req as any).user?.organizationId;
-    const { provider, accountSid, authToken, apiKey, sipUri, spaceUrl, telnyxConnectionId, telnyxSipUsername, telnyxSipPassword } = req.body as TelephonyConfigRequest;
+    const { provider, accountSid, authToken, apiKey, sipUri, spaceUrl, telnyxConnectionId, telnyxSipUsername, telnyxSipPassword, sipHost, sipUsername, sipPassword, sipTransport, sipNumbers, skytelecomApiKey } = req.body as TelephonyConfigRequest;
 
     if (!organizationId) {
       return res.status(401).json({ error: 'Unauthorized' });
@@ -444,11 +480,39 @@ router.post('/telephony', async (req: Request, res: Response) => {
       }
     }
 
+    if (provider === 'custom_sip') {
+      if (!sipHost) {
+        return res.status(400).json({ error: 'SIP host is required for Custom SIP (e.g. sip.twilio.com)' });
+      }
+      if (!sipUsername) {
+        return res.status(400).json({ error: 'SIP username is required for Custom SIP' });
+      }
+      if (sipTransport && !SIP_TRANSPORTS.includes(sipTransport)) {
+        return res.status(400).json({ error: 'Invalid SIP transport. Must be one of: auto, udp, tcp, tls' });
+      }
+      if (sipNumbers && !Array.isArray(sipNumbers)) {
+        return res.status(400).json({ error: 'sipNumbers must be an array of E.164 phone numbers' });
+      }
+    }
+
+    if (provider === 'skytelecom') {
+      if (!sipUsername) {
+        return res.status(400).json({ error: 'SIP username (extension) is required for SkyTelecom' });
+      }
+      if (sipTransport && !SIP_TRANSPORTS.includes(sipTransport)) {
+        return res.status(400).json({ error: 'Invalid SIP transport. Must be one of: auto, udp, tcp, tls' });
+      }
+      if (sipNumbers && !Array.isArray(sipNumbers)) {
+        return res.status(400).json({ error: 'sipNumbers must be an array' });
+      }
+    }
+
     // Encrypt credentials
     const encryptedAccountSid = accountSid ? encryptApiKey(accountSid) : null;
     const encryptedAuthToken = authToken ? encryptApiKey(authToken) : null;
     const encryptedApiKeyValue = apiKey ? encryptApiKey(apiKey) : null;
     const encryptedTelnyxSipPwd = telnyxSipPassword ? encryptApiKey(telnyxSipPassword) : null;
+    const encryptedSkytelecomApiKey = skytelecomApiKey ? encryptApiKey(skytelecomApiKey) : null;
 
     // Get masked prefixes
     const accountSidPrefix = accountSid ? getMaskedKeyPrefix(accountSid) : null;
@@ -460,6 +524,96 @@ router.post('/telephony', async (req: Request, res: Response) => {
       .from(telephonyConfig)
       .where(eq(telephonyConfig.organizationId, organizationId))
       .limit(1);
+
+    // ─── Custom SIP (BYOK) & SkyTelecom: provision a dedicated LiveKit outbound trunk ───
+    // The platform's LiveKit bridges the media; the org's own carrier terminates
+    // the PSTN leg, so each org gets its own trunk with its own credentials.
+    // SkyTelecom is a pre-configured variant of BYOK with known defaults.
+    let livekitOutboundTrunkId: string | null = existingConfig[0]?.livekitOutboundTrunkId || null;
+    let encryptedCustomSipPassword: string | null = existingConfig[0]?.encryptedCustomSipPassword || null;
+    let storedEncryptedSkytelecomApiKey: string | null = existingConfig[0]?.encryptedSkytelecomApiKey || null;
+
+    const isByokProvider = provider === 'custom_sip' || provider === 'skytelecom';
+
+    if (isByokProvider) {
+      if (!livekitService.isConfigured()) {
+        return res.status(503).json({ error: 'Platform LiveKit is not configured. Custom SIP (BYOK) requires LiveKit to bridge calls.' });
+      }
+
+      // For skytelecom, use pre-configured host if not provided
+      const effectiveSipHost = provider === 'skytelecom'
+        ? (sipHost || SKYTELECOM_DEFAULTS.sipHost)
+        : sipHost!;
+
+      // Password required on first setup; on updates the stored one is reused
+      if (!sipPassword && !encryptedCustomSipPassword) {
+        return res.status(400).json({ error: 'SIP password is required' });
+      }
+
+      const effectivePassword = sipPassword || decryptApiKey(encryptedCustomSipPassword!);
+      if (sipPassword) {
+        encryptedCustomSipPassword = encryptApiKey(sipPassword);
+      }
+
+      // For skytelecom, preserve stored API key if not provided on update
+      if (skytelecomApiKey) {
+        storedEncryptedSkytelecomApiKey = encryptedSkytelecomApiKey;
+      }
+
+      const effectiveTransport = sipTransport || (provider === 'skytelecom' ? SKYTELECOM_DEFAULTS.sipTransport : 'auto');
+      const numbers = (sipNumbers || []).map(n => n.trim()).filter(Boolean);
+      const trunkOptions = {
+        name: provider === 'skytelecom' ? `skytelecom-${organizationId.slice(0, 8)}` : `byok-${organizationId.slice(0, 8)}`,
+        address: effectiveSipHost,
+        numbers,
+        authUsername: sipUsername,
+        authPassword: effectivePassword,
+        transport: SIP_TRANSPORT_MAP[effectiveTransport || 'auto'],
+      };
+
+      try {
+        if (livekitOutboundTrunkId) {
+          // LiveKit update API uses ListUpdate for arrays and doesn't allow
+          // changing address/transport — only credentials, numbers, and name.
+          await livekitService.updateOutboundTrunk(livekitOutboundTrunkId, {
+            name: trunkOptions.name,
+            authUsername: trunkOptions.authUsername,
+            authPassword: trunkOptions.authPassword,
+            numbers: { set: numbers },
+          });
+        } else {
+          const trunk: any = await livekitService.createOutboundTrunk(trunkOptions);
+          livekitOutboundTrunkId = trunk?.sipTrunkId || trunk?.sip_trunk_id || null;
+          if (!livekitOutboundTrunkId) {
+            throw new Error('LiveKit did not return a trunk ID');
+          }
+        }
+      } catch (trunkError: any) {
+        console.error('Failed to provision BYOK/SkyTelecom SIP trunk:', trunkError?.message || trunkError);
+        return res.status(502).json({ error: `Failed to provision SIP trunk: ${trunkError?.message || 'unknown error'}` });
+      }
+    } else if (livekitOutboundTrunkId && livekitService.isConfigured()) {
+      // Switching away from custom_sip/skytelecom — release the provisioned trunk
+      try {
+        await livekitService.deleteOutboundTrunk(livekitOutboundTrunkId);
+      } catch (cleanupError: any) {
+        console.warn('Failed to delete BYOK trunk during provider switch:', cleanupError?.message);
+      }
+      livekitOutboundTrunkId = null;
+      encryptedCustomSipPassword = null;
+      storedEncryptedSkytelecomApiKey = null;
+    }
+
+    const isSkytelecom = provider === 'skytelecom';
+    const customSipFields = {
+      customSipHost: isByokProvider ? (isSkytelecom ? (sipHost || SKYTELECOM_DEFAULTS.sipHost) : sipHost) : null,
+      customSipUsername: isByokProvider ? sipUsername : null,
+      encryptedCustomSipPassword,
+      customSipTransport: isByokProvider ? (sipTransport || (isSkytelecom ? SKYTELECOM_DEFAULTS.sipTransport : 'auto')) : null,
+      customSipNumbers: isByokProvider ? (sipNumbers || []) : null,
+      livekitOutboundTrunkId,
+      encryptedSkytelecomApiKey: isSkytelecom ? storedEncryptedSkytelecomApiKey : null,
+    };
 
     if (existingConfig.length > 0) {
       // Update existing config
@@ -477,6 +631,7 @@ router.post('/telephony', async (req: Request, res: Response) => {
           telnyxConnectionId: telnyxConnectionId || null,
           telnyxSipUsername: telnyxSipUsername || null,
           encryptedTelnyxSipPassword: encryptedTelnyxSipPwd,
+          ...customSipFields,
           isConfigured: true,
           updatedAt: new Date(),
         })
@@ -496,6 +651,7 @@ router.post('/telephony', async (req: Request, res: Response) => {
         telnyxConnectionId: telnyxConnectionId || null,
         telnyxSipUsername: telnyxSipUsername || null,
         encryptedTelnyxSipPassword: encryptedTelnyxSipPwd,
+        ...customSipFields,
         isConfigured: true,
       });
     }
@@ -511,6 +667,13 @@ router.post('/telephony', async (req: Request, res: Response) => {
       authTokenPrefix,
       telnyxConnectionId,
       telnyxSipUsername,
+      ...(provider === 'custom_sip' || provider === 'skytelecom' ? {
+        customSipHost: isSkytelecom ? (sipHost || SKYTELECOM_DEFAULTS.sipHost) : sipHost,
+        customSipUsername: sipUsername,
+        customSipTransport: sipTransport || (isSkytelecom ? SKYTELECOM_DEFAULTS.sipTransport : 'auto'),
+        customSipNumbers: sipNumbers || [],
+        livekitOutboundTrunkId,
+      } : {}),
     });
   } catch (error) {
     console.error('Error configuring telephony:', error);
@@ -549,6 +712,21 @@ router.delete('/telephony', async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
+    // Release the org's BYOK trunk from LiveKit before dropping the config
+    const existing = await db
+      .select({ livekitOutboundTrunkId: telephonyConfig.livekitOutboundTrunkId })
+      .from(telephonyConfig)
+      .where(eq(telephonyConfig.organizationId, organizationId))
+      .limit(1);
+
+    if (existing[0]?.livekitOutboundTrunkId && livekitService.isConfigured()) {
+      try {
+        await livekitService.deleteOutboundTrunk(existing[0].livekitOutboundTrunkId);
+      } catch (trunkError: any) {
+        console.warn('Failed to delete BYOK trunk from LiveKit:', trunkError?.message);
+      }
+    }
+
     await db
       .delete(telephonyConfig)
       .where(eq(telephonyConfig.organizationId, organizationId));
@@ -570,6 +748,11 @@ async function verifyTelephonyCredentials(
       case 'livekit_sip':
         // LiveKit SIP doesn't have a simple verify endpoint
         return true;
+
+      case 'custom_sip':
+        // BYOK credentials are validated when the trunk is provisioned on save,
+        // and by the carrier itself on the first call
+        return livekitService.isConfigured();
 
       default:
         return false;

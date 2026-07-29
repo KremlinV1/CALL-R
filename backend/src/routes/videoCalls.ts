@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { AuthRequest } from '../middleware/auth.js';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
 
 const router = Router();
@@ -11,6 +13,7 @@ const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET || '';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 const HEYGEN_API_KEY = process.env.HEYGEN_API_KEY || process.env.LIVEAVATAR_API_KEY || '';
 const HEYGEN_API_BASE = process.env.HEYGEN_API_BASE || 'https://api.liveavatar.com';
+const SOURCE_FACE_PATH = process.env.FACE_SWAP_SOURCE_IMAGE || './models/source_face.jpg';
 
 // In-memory store for customer join tokens (roomName -> { token, expiresAt, customerName })
 // In production, use Redis or DB for multi-instance deployments
@@ -47,6 +50,53 @@ function getRoomService() {
   );
 }
 
+// POST /api/video-calls/upload-face
+// Upload a target face image for face swap (base64 JSON payload)
+router.post('/upload-face', async (req: AuthRequest, res: Response) => {
+  try {
+    const organizationId = req.user?.organizationId;
+    if (!organizationId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { image } = req.body as { image?: string };
+    if (!image || !image.startsWith('data:image/')) {
+      return res.status(400).json({ error: 'A base64 data:image/ is required' });
+    }
+
+    // Extract mime type and base64 data
+    const match = image.match(/^data:image\/(\w+);base64,(.+)$/);
+    if (!match) {
+      return res.status(400).json({ error: 'Invalid image format' });
+    }
+
+    const ext = match[1] === 'jpeg' ? 'jpg' : match[1];
+    const base64Data = match[2];
+    const fileName = `face_${organizationId.slice(0, 8)}_${Date.now()}.${ext}`;
+
+    // Save to agents/models/ directory (where the face swap agent looks)
+    const agentsModelsDir = path.resolve(process.cwd(), '..', 'agents', 'models');
+    if (!fs.existsSync(agentsModelsDir)) {
+      fs.mkdirSync(agentsModelsDir, { recursive: true });
+    }
+
+    const filePath = path.join(agentsModelsDir, fileName);
+    fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
+
+    const relativePath = `./models/${fileName}`;
+
+    res.json({
+      success: true,
+      faceImagePath: relativePath,
+      absolutePath: filePath,
+      fileName,
+    });
+  } catch (error: any) {
+    console.error('Error uploading face image:', error);
+    res.status(500).json({ error: error.message || 'Failed to upload face image' });
+  }
+});
+
 // POST /api/video-calls/create
 // Create a new video call room, return agent token + customer join URL
 router.post('/create', async (req: AuthRequest, res: Response) => {
@@ -63,7 +113,7 @@ router.post('/create', async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const { customerName, customerPhone, agentDisplayName, enableFaceSwap } = req.body;
+    const { customerName, customerPhone, agentDisplayName, enableFaceSwap, faceImagePath } = req.body;
 
     if (!customerName) {
       return res.status(400).json({ error: 'customerName is required' });
@@ -85,6 +135,7 @@ router.post('/create', async (req: AuthRequest, res: Response) => {
           customerName,
           customerPhone,
           enableFaceSwap: !!enableFaceSwap,
+          faceImagePath: enableFaceSwap ? (faceImagePath || SOURCE_FACE_PATH) : undefined,
         }),
       });
     } catch (e) {
