@@ -37,7 +37,7 @@ services:
     region: oregon
     rootDir: agents
     dockerfilePath: ./Dockerfile
-    plan: starter
+    plan: pro
     envVars:
       - key: LIVEKIT_URL
         sync: false
