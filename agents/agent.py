@@ -202,7 +202,6 @@ class PONELineAgent(Agent):
                 min_silence_duration=0.5,
                 activation_threshold=0.6,
             ),
-            allow_remote_intervals=True,
         )
     
     def set_room_context(self, room_name: str, participant_identity: str):

@@ -252,8 +252,6 @@ Authenticated: {self.authenticated}
             llm=openai.LLM(model="gpt-4o-mini", temperature=0.6),
             tts=tts,
             vad=vad,
-            # Allow user to interrupt the agent mid-sentence
-            allow_remote_intervals=True,
         )
     
     def set_room_context(self, room_name: str, participant_identity: str):
