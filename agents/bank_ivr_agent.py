@@ -194,9 +194,13 @@ class BankIVRAgent(Agent):
             )
         elif ELEVENLABS_API_KEY and ELEVENLABS_API_KEY != "your_elevenlabs_key":
             tts = elevenlabs.TTS(
-                voice="21m00Tcm4TlvDq8ikWAM",
-                streaming=True,
                 model_id="eleven_turbo_v2_5",
+                voice_settings=elevenlabs.VoiceSettings(
+                    voice_id="21m00Tcm4TlvDq8ikWAM",
+                    stability=0.5,
+                    similarity_boost=0.75,
+                    use_speaker_boost=True,
+                ),
             )
         else:
             tts = openai.TTS(voice="nova", model="tts-1")
