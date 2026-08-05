@@ -179,13 +179,15 @@ class PONELineAgent(Agent):
             tts = cartesia.TTS(voice=self.config.voice_id, streaming=True)
         elif ELEVENLABS_API_KEY and ELEVENLABS_API_KEY != "your_elevenlabs_key":
             tts = elevenlabs.TTS(
-                model_id="eleven_turbo_v2_5",
+                voice_id="21m00Tcm4TlvDq8ikWAM",
+                model="eleven_flash_v2_5",
                 voice_settings=elevenlabs.VoiceSettings(
-                    voice_id="21m00Tcm4TlvDq8ikWAM",
                     stability=0.5,
                     similarity_boost=0.75,
                     use_speaker_boost=True,
+                    speed=1.0,
                 ),
+                streaming_latency=0,
             )
         else:
             tts = openai.TTS(voice="alloy", model="tts-1")
