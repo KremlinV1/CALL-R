@@ -27,7 +27,7 @@ from livekit.agents import (
     RunContext,
 )
 from livekit.agents.voice import ModelSettings
-from livekit.plugins import openai, silero, cartesia, deepgram
+from livekit.plugins import openai, silero, cartesia, deepgram, elevenlabs
 
 load_dotenv()
 
@@ -42,6 +42,7 @@ LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 CARTESIA_API_KEY = os.getenv("CARTESIA_API_KEY", "")
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "")
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 
 
 class TransferDestination:
@@ -167,24 +168,35 @@ class PONELineAgent(Agent):
         self._livekit_api = None
         
         # Initialize components
-        # Use OpenAI for STT if Deepgram not configured
+        # Use Deepgram for STT if configured (streaming, low-latency)
         if DEEPGRAM_API_KEY and DEEPGRAM_API_KEY != "your_deepgram_key":
-            stt = deepgram.STT(model="nova-2", language="en")
+            stt = deepgram.STT(model="nova-2", language="en", interim_results=True)
         else:
             stt = openai.STT()
         
-        # Use Cartesia for TTS if configured, else OpenAI
+        # Use Cartesia for TTS if configured (streaming, lowest latency)
         if CARTESIA_API_KEY and CARTESIA_API_KEY != "your_cartesia_key":
-            tts = cartesia.TTS(voice=self.config.voice_id)
+            tts = cartesia.TTS(voice=self.config.voice_id, streaming=True)
+        elif ELEVENLABS_API_KEY and ELEVENLABS_API_KEY != "your_elevenlabs_key":
+            tts = elevenlabs.TTS(
+                voice="21m00Tcm4TlvDq8ikWAM",
+                streaming=True,
+                model_id="eleven_turbo_v2_5",
+            )
         else:
-            tts = openai.TTS(voice="alloy")
+            tts = openai.TTS(voice="alloy", model="tts-1")
         
         super().__init__(
             instructions=self.config.system_prompt,
             stt=stt,
-            llm=openai.LLM(model="gpt-4o"),  # Using GPT-4o for smoother, faster responses
+            llm=openai.LLM(model="gpt-4o-mini", temperature=0.6),
             tts=tts,
-            vad=silero.VAD.load(),
+            vad=silero.VAD.load(
+                min_speech_duration=0.2,
+                min_silence_duration=0.5,
+                activation_threshold=0.6,
+            ),
+            allow_remote_intervals=True,
         )
     
     def set_room_context(self, room_name: str, participant_identity: str):
@@ -471,7 +483,7 @@ async def entrypoint(ctx: JobContext):
             logger.warning("Timeout waiting for audio subscription, proceeding anyway")
     
     # Small delay to ensure audio pipeline is fully ready
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(0.3)
     
     # Say opening message now that caller is connected and audio is ready
     opening = config.interpolate_variables(config.opening_message)

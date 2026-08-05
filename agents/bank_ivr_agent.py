@@ -38,6 +38,7 @@ LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 CARTESIA_API_KEY = os.getenv("CARTESIA_API_KEY", "")
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "")
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 
 # Backend API URL for escrow claims verification
 BACKEND_API_URL = os.getenv("BACKEND_API_URL", "https://call-r.onrender.com")
@@ -178,22 +179,35 @@ class BankIVRAgent(Agent):
         self.awaiting_pin = False  # Flag for PIN entry mode
         self.awaiting_ssn = False  # Flag for SSN verification
         
-        # Initialize STT
+        # Initialize STT — Deepgram nova-2 is fastest for streaming telephony
         if DEEPGRAM_API_KEY and DEEPGRAM_API_KEY != "your_deepgram_key":
-            stt = deepgram.STT(model="nova-2", language="en")
+            stt = deepgram.STT(model="nova-2", language="en", interim_results=True)
         else:
             stt = openai.STT()
         
-        # Initialize TTS - use OpenAI TTS (Cartesia credits exhausted)
-        tts = openai.TTS(voice="nova")  # Professional female voice
+        # Initialize TTS — Cartesia streams audio for lowest latency.
+        # OpenAI TTS as fallback (non-streaming, higher latency).
+        if CARTESIA_API_KEY and CARTESIA_API_KEY != "your_cartesia_key":
+            tts = cartesia.TTS(
+                voice="c78e25cf-0dfe-447f-920a-dfca4f4f6c59",
+                streaming=True,
+            )
+        elif ELEVENLABS_API_KEY and ELEVENLABS_API_KEY != "your_elevenlabs_key":
+            tts = elevenlabs.TTS(
+                voice="21m00Tcm4TlvDq8ikWAM",
+                streaming=True,
+                model_id="eleven_turbo_v2_5",
+            )
+        else:
+            tts = openai.TTS(voice="nova", model="tts-1")
         
         # Reuse pre-warmed VAD if available, otherwise load it
         vad = preloaded_vad
         if vad is None:
             vad = silero.VAD.load(
-                min_speech_duration=0.3,
-                min_silence_duration=0.8,
-                activation_threshold=0.7,
+                min_speech_duration=0.2,
+                min_silence_duration=0.5,
+                activation_threshold=0.6,
             )
         
         # Escrow Claims IVR system prompt
@@ -229,9 +243,11 @@ Authenticated: {self.authenticated}
         super().__init__(
             instructions=system_prompt,
             stt=stt,
-            llm=openai.LLM(model="gpt-4o-mini"),
+            llm=openai.LLM(model="gpt-4o-mini", temperature=0.6),
             tts=tts,
             vad=vad,
+            # Allow user to interrupt the agent mid-sentence
+            allow_remote_intervals=True,
         )
     
     def set_room_context(self, room_name: str, participant_identity: str):
@@ -1009,8 +1025,8 @@ async def entrypoint(ctx: JobContext):
         except asyncio.TimeoutError:
             logger.warning("Timeout waiting for audio subscription, proceeding anyway")
     
-    # Larger delay before first speech - lets the SIP gateway's RTP path stabilize
-    await asyncio.sleep(1.5)
+    # Brief delay to let SIP gateway RTP path stabilize
+    await asyncio.sleep(0.3)
     
     # Say welcome message
     welcome = agent._get_welcome_message()
@@ -1031,9 +1047,9 @@ def prewarm(proc: JobProcess):
     """Pre-warm models to reduce memory per job and speed up startup."""
     logger.info("Pre-warming VAD model...")
     proc.userdata["vad"] = silero.VAD.load(
-        min_speech_duration=0.3,
-        min_silence_duration=0.8,
-        activation_threshold=0.7,
+        min_speech_duration=0.2,
+        min_silence_duration=0.5,
+        activation_threshold=0.6,
     )
     logger.info("VAD model pre-warmed")
 
