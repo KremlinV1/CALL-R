@@ -219,12 +219,9 @@ Authenticated: {self.authenticated}
         super().__init__(
             instructions=system_prompt,
             stt=stt,
-            llm=openai.LLM(model="gpt-4o"),
+            llm=openai.LLM(model="gpt-4o-mini"),
             tts=tts,
             # Tune VAD for IVR: less sensitive to background noise & brief sounds
-            # - min_speech_duration: require longer speech before counting it as real
-            # - min_silence_duration: wait longer for a pause before ending turn
-            # - activation_threshold: higher = less sensitive (default 0.5)
             vad=silero.VAD.load(
                 min_speech_duration=0.3,
                 min_silence_duration=0.8,
@@ -945,6 +942,8 @@ async def entrypoint(ctx: JobContext):
     logger.info(f"IVR agent will identify as: {agent.institution_name}")
     
     # Listen for new participants
+    caller_joined = asyncio.Event()
+
     @ctx.room.on("participant_connected")
     def on_participant_connected(participant):
         nonlocal participant_identity
@@ -952,6 +951,7 @@ async def entrypoint(ctx: JobContext):
             participant_identity = participant.identity
             agent.set_room_context(ctx.room.name, participant_identity)
             logger.info(f"Updated participant context: {participant_identity}")
+            caller_joined.set()
     
     # Create session with default options (deprecated kwargs caused issues in 1.5.x).
     # Per-utterance interruption control is set on each session.say() call instead.
@@ -978,6 +978,18 @@ async def entrypoint(ctx: JobContext):
     await session.start(agent=agent, room=ctx.room)
     
     logger.info("Bank IVR Agent is now active with DTMF support")
+    
+    # If caller is already in the room, set the event
+    if participant_identity:
+        caller_joined.set()
+    
+    # Wait for the SIP participant (phone leg) to join before speaking
+    logger.info("Waiting for caller (SIP participant) to join room...")
+    try:
+        await asyncio.wait_for(caller_joined.wait(), timeout=60.0)
+        logger.info(f"Caller joined room: {participant_identity}")
+    except asyncio.TimeoutError:
+        logger.warning("Timeout waiting for caller to join, proceeding anyway")
     
     # Wait for audio subscription
     if session._room_io and session._room_io.subscribed_fut:
@@ -1006,6 +1018,17 @@ async def entrypoint(ctx: JobContext):
     # through the WorkerOptions/cli.run_app pattern - no explicit wait needed
 
 
+def prewarm(proc: JobProcess):
+    """Pre-warm models to reduce memory per job and speed up startup."""
+    logger.info("Pre-warming VAD model...")
+    proc.userdata["vad"] = silero.VAD.load(
+        min_speech_duration=0.3,
+        min_silence_duration=0.8,
+        activation_threshold=0.7,
+    )
+    logger.info("VAD model pre-warmed")
+
+
 if __name__ == "__main__":
     logger.info(f"Starting {BANK_NAME} IVR System...")
     
@@ -1016,5 +1039,8 @@ if __name__ == "__main__":
             api_key=LIVEKIT_API_KEY,
             api_secret=LIVEKIT_API_SECRET,
             ws_url=LIVEKIT_URL,
+            prewarm_fnc=prewarm,
+            # Limit to 1 concurrent job to stay within memory on Render
+            max_retry=1,
         ),
     )

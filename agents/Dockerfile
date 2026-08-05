@@ -20,6 +20,8 @@ COPY . .
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONMALLOC=malloc
+ENV MALLOC_TRIM_THRESHOLD_=65536
 
-# Run the bank IVR agent
-CMD ["python", "bank_ivr_agent.py", "start"]
+# Run the bank IVR agent with memory optimization
+CMD ["python", "-X", "gc_min_threshold=100", "-X", "gc_min_interval=50", "bank_ivr_agent.py", "start"]

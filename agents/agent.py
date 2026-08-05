@@ -417,6 +417,9 @@ async def entrypoint(ctx: JobContext):
         participant_identity=participant_identity
     )
     
+    # Event that fires when a non-agent (caller/SIP) participant joins
+    caller_joined = asyncio.Event()
+
     # Listen for new participants to update context
     @ctx.room.on("participant_connected")
     def on_participant_connected(participant):
@@ -425,6 +428,7 @@ async def entrypoint(ctx: JobContext):
             participant_identity = participant.identity
             agent.set_room_context(ctx.room.name, participant_identity)
             logger.info(f"Updated participant context: {participant_identity}")
+            caller_joined.set()
     
     session = AgentSession()
     
@@ -443,6 +447,19 @@ async def entrypoint(ctx: JobContext):
     
     logger.info("Agent is now active and listening")
     
+    # If caller is already in the room, set the event
+    if participant_identity:
+        caller_joined.set()
+    
+    # Wait for the SIP participant (phone leg) to join before speaking
+    # This ensures the caller can actually hear the opening message
+    logger.info("Waiting for caller (SIP participant) to join room...")
+    try:
+        await asyncio.wait_for(caller_joined.wait(), timeout=60.0)
+        logger.info(f"Caller joined room: {participant_identity}")
+    except asyncio.TimeoutError:
+        logger.warning("Timeout waiting for caller to join, proceeding anyway")
+    
     # Wait for audio output to be subscribed before saying opening message
     # This ensures the caller can actually hear the agent
     if session._room_io and session._room_io.subscribed_fut:
@@ -456,7 +473,7 @@ async def entrypoint(ctx: JobContext):
     # Small delay to ensure audio pipeline is fully ready
     await asyncio.sleep(0.5)
     
-    # Say opening message now that audio is ready
+    # Say opening message now that caller is connected and audio is ready
     opening = config.interpolate_variables(config.opening_message)
     if opening:
         logger.info(f"Saying opening message: {opening[:50]}...")
