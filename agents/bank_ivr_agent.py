@@ -158,7 +158,8 @@ class BankIVRAgent(Agent):
     """
     
     def __init__(self, room_name: str = None, participant_identity: str = None,
-                 institution_name: Optional[str] = None, escrow_type: Optional[str] = None):
+                 institution_name: Optional[str] = None, escrow_type: Optional[str] = None,
+                 preloaded_vad=None):
         self.room_name = room_name
         self.participant_identity = participant_identity
         # Dynamic institution name — defaults to BANK_NAME, overridden by room metadata
@@ -185,6 +186,15 @@ class BankIVRAgent(Agent):
         
         # Initialize TTS - use OpenAI TTS (Cartesia credits exhausted)
         tts = openai.TTS(voice="nova")  # Professional female voice
+        
+        # Reuse pre-warmed VAD if available, otherwise load it
+        vad = preloaded_vad
+        if vad is None:
+            vad = silero.VAD.load(
+                min_speech_duration=0.3,
+                min_silence_duration=0.8,
+                activation_threshold=0.7,
+            )
         
         # Escrow Claims IVR system prompt
         system_prompt = f"""You are the automated voice system for {self.institution_name}. You are a professional, secure, and authoritative escrow claims assistant.
@@ -221,12 +231,7 @@ Authenticated: {self.authenticated}
             stt=stt,
             llm=openai.LLM(model="gpt-4o-mini"),
             tts=tts,
-            # Tune VAD for IVR: less sensitive to background noise & brief sounds
-            vad=silero.VAD.load(
-                min_speech_duration=0.3,
-                min_silence_duration=0.8,
-                activation_threshold=0.7,
-            ),
+            vad=vad,
         )
     
     def set_room_context(self, room_name: str, participant_identity: str):
@@ -932,12 +937,16 @@ async def entrypoint(ctx: JobContext):
             logger.info(f"Found caller participant: {participant_identity}")
             break
 
+    # Get pre-warmed VAD from process userdata
+    preloaded_vad = ctx.proc.userdata.get("vad") if hasattr(ctx, 'proc') else None
+
     # Create the Bank IVR agent with the institution context (if any)
     agent = BankIVRAgent(
         room_name=ctx.room.name,
         participant_identity=participant_identity,
         institution_name=metadata_institution_name,
         escrow_type=metadata_escrow_type,
+        preloaded_vad=preloaded_vad,
     )
     logger.info(f"IVR agent will identify as: {agent.institution_name}")
     
@@ -1040,7 +1049,7 @@ if __name__ == "__main__":
             api_secret=LIVEKIT_API_SECRET,
             ws_url=LIVEKIT_URL,
             prewarm_fnc=prewarm,
-            # Limit to 1 concurrent job to stay within memory on Render
+            num_idle_processes=1,
             max_retry=1,
         ),
     )
