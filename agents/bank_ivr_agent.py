@@ -43,6 +43,16 @@ ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 # Backend API URL for escrow claims verification
 BACKEND_API_URL = os.getenv("BACKEND_API_URL", "https://call-r.onrender.com")
 
+# ─── Live Transfer Configuration ────────────────────────────────────
+# Phone numbers for live transfer destinations (read from env)
+TRANSFER_SPECIALIST_NUMBER = os.getenv("TRANSFER_SPECIALIST_NUMBER", "")
+TRANSFER_REPRESENTATIVE_NUMBER = os.getenv("TRANSFER_REPRESENTATIVE_NUMBER", TRANSFER_SPECIALIST_NUMBER)
+# Outbound SIP trunk ID for bridged transfers (dialing specialist into room).
+# If blank, the agent will try to fetch it from the backend API.
+OUTBOUND_SIP_TRUNK_ID = os.getenv("OUTBOUND_SIP_TRUNK_ID", "")
+# SkyTelecom SIP host (used for SIP URI when dialing specialist)
+SKYTELECOM_SIP_HOST = os.getenv("SKYTELECOM_SIP_HOST", "connect.skytelecom.io:5060")
+
 # Default bank name configuration (used when no institution metadata is provided)
 BANK_NAME = "Federal Reserve Bank Escrow Accounts"
 BANK_SHORT_NAME = "FRBEA"
@@ -91,6 +101,41 @@ class MenuState(Enum):
     ENTER_CLAIM_CODE = "enter_claim_code"
     ENTER_PIN = "enter_pin"
     VERIFY_SSN = "verify_ssn"
+
+
+async def fetch_org_sip_trunk_id(organization_id: str) -> Optional[str]:
+    """Fetch the org's provisioned LiveKit outbound trunk ID from the backend.
+
+    This allows the IVR agent to use the org's own SkyTelecom / Custom SIP
+    trunk for bridged transfers without hardcoding it.
+    """
+    if not organization_id:
+        return None
+    try:
+        headers = {}
+        api_token = os.getenv("BACKEND_API_TOKEN", "")
+        if api_token:
+            headers["Authorization"] = f"Bearer {api_token}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{BACKEND_API_URL}/api/ivr-verify/telephony-config",
+                headers=headers,
+                params={"organizationId": organization_id},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    trunk_id = data.get("livekitOutboundTrunkId")
+                    if trunk_id:
+                        logger.info(f"Fetched org SIP trunk ID from backend: {trunk_id}")
+                        return trunk_id
+                    logger.warning("Backend returned no trunk ID for org")
+                    return None
+                logger.warning(f"Failed to fetch trunk ID: HTTP {response.status}")
+                return None
+    except Exception as e:
+        logger.error(f"Error fetching org SIP trunk ID: {e}")
+        return None
 
 
 async def verify_claim_with_backend(claim_code: str, pin: str) -> dict:
@@ -160,9 +205,10 @@ class BankIVRAgent(Agent):
     
     def __init__(self, room_name: str = None, participant_identity: str = None,
                  institution_name: Optional[str] = None, escrow_type: Optional[str] = None,
-                 preloaded_vad=None):
+                 preloaded_vad=None, organization_id: Optional[str] = None):
         self.room_name = room_name
         self.participant_identity = participant_identity
+        self.organization_id = organization_id
         # Dynamic institution name — defaults to BANK_NAME, overridden by room metadata
         # or by the claim's escrow_type after the caller authenticates
         self.escrow_type = escrow_type
@@ -194,7 +240,7 @@ class BankIVRAgent(Agent):
             )
         elif ELEVENLABS_API_KEY and ELEVENLABS_API_KEY != "your_elevenlabs_key":
             tts = elevenlabs.TTS(
-                voice_id="21m00Tcm4TlvDq8ikWAM",
+                voice_id="EXAVITQu4vr4xnSDxMaL",
                 model="eleven_flash_v2_5",
                 voice_settings=elevenlabs.VoiceSettings(
                     stability=0.5,
@@ -619,21 +665,34 @@ Authenticated: {self.authenticated}
         # Dial the specialist into the current room (bridged call)
         if self.room_name:
             try:
-                specialist_number = "+17542299366"
-                outbound_trunk_id = "ST_6k7kKQwNtC9F"  # Telnyx Outbound trunk
-                
+                specialist_number = TRANSFER_SPECIALIST_NUMBER
+                if not specialist_number:
+                    logger.error("TRANSFER_SPECIALIST_NUMBER not configured — cannot dial specialist")
+                    return transfer_message + " I'm having trouble connecting you. Please try calling back later."
+
+                # Resolve outbound trunk ID: env var → backend API → fallback
+                outbound_trunk_id = OUTBOUND_SIP_TRUNK_ID
+                if not outbound_trunk_id and self.organization_id:
+                    outbound_trunk_id = await fetch_org_sip_trunk_id(self.organization_id)
+                if not outbound_trunk_id:
+                    logger.error("No outbound SIP trunk ID available — set OUTBOUND_SIP_TRUNK_ID or configure SkyTelecom in settings")
+                    return transfer_message + " I'm having trouble connecting you. Please try calling back later."
+
+                # Build SIP URI for the specialist using SkyTelecom (or configured) host
+                sip_call_to = f"sip:{specialist_number}@{SKYTELECOM_SIP_HOST}"
+
                 async with api.LiveKitAPI() as livekit_api:
                     # Create outbound SIP participant (dial specialist into room)
                     create_request = CreateSIPParticipantRequest(
                         sip_trunk_id=outbound_trunk_id,
-                        sip_call_to=f"sip:{specialist_number}@sip.telnyx.com",
+                        sip_call_to=sip_call_to,
                         room_name=self.room_name,
                         participant_identity="specialist",
                         participant_name="Claims Specialist",
                         play_dialtone=True
                     )
                     await livekit_api.sip.create_sip_participant(create_request)
-                    logger.info(f"Outbound call initiated to specialist: {specialist_number}")
+                    logger.info(f"Outbound call initiated to specialist: {specialist_number} via trunk {outbound_trunk_id}")
             except Exception as e:
                 logger.error(f"Outbound call to specialist failed: {e}")
                 return transfer_message + " I'm having trouble connecting you. Please try calling back later."
@@ -876,8 +935,11 @@ Authenticated: {self.authenticated}
         # Attempt actual SIP transfer if configured
         if self.room_name and self.participant_identity:
             try:
-                # Transfer to customer service number (configure this in your setup)
-                transfer_to = "tel:+18005551234"  # Replace with actual customer service number
+                # Use configurable transfer destination (env var)
+                transfer_to = f"tel:{TRANSFER_REPRESENTATIVE_NUMBER}"
+                if not TRANSFER_REPRESENTATIVE_NUMBER:
+                    logger.warning("TRANSFER_REPRESENTATIVE_NUMBER not configured — SIP transfer skipped")
+                    return transfer_message + " I'm having trouble connecting you. Please try calling back or visit our website."
                 
                 async with api.LiveKitAPI() as livekit_api:
                     transfer_request = TransferSIPParticipantRequest(
@@ -940,12 +1002,14 @@ async def entrypoint(ctx: JobContext):
     # in room.metadata when dispatching the agent for a specific claim.
     metadata_escrow_type: Optional[str] = None
     metadata_institution_name: Optional[str] = None
+    metadata_org_id: Optional[str] = None
     try:
         if ctx.room.metadata:
             md = json.loads(ctx.room.metadata)
             metadata_escrow_type = md.get("escrowType") or md.get("escrow_type")
             metadata_institution_name = md.get("institutionName") or md.get("institution_name")
-            logger.info(f"Room metadata — escrowType={metadata_escrow_type}, institution={metadata_institution_name}")
+            metadata_org_id = md.get("organizationId") or md.get("organization_id")
+            logger.info(f"Room metadata — escrowType={metadata_escrow_type}, institution={metadata_institution_name}, orgId={metadata_org_id}")
     except Exception as e:
         logger.warning(f"Could not parse room metadata: {e}")
 
@@ -967,6 +1031,7 @@ async def entrypoint(ctx: JobContext):
         institution_name=metadata_institution_name,
         escrow_type=metadata_escrow_type,
         preloaded_vad=preloaded_vad,
+        organization_id=metadata_org_id,
     )
     logger.info(f"IVR agent will identify as: {agent.institution_name}")
     

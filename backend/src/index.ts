@@ -102,6 +102,7 @@ import { Router } from 'express';
 import { db } from './db/index.js';
 import { escrowClaims } from './db/schema.js';
 import { eq } from 'drizzle-orm';
+import { telephonyConfig } from './db/schema.js';
 
 const publicIvrRouter = Router();
 publicIvrRouter.post('/verify', async (req, res) => {
@@ -204,6 +205,42 @@ publicIvrRouter.post('/verify', async (req, res) => {
     res.status(500).json({ error: 'Failed to verify claim', verified: false, details: error?.message });
   }
 });
+
+// Public endpoint for IVR agent to fetch org's SIP trunk ID for live transfers
+publicIvrRouter.get('/telephony-config', async (req, res) => {
+  try {
+    const organizationId = req.query.organizationId as string;
+    if (!organizationId) {
+      return res.status(400).json({ error: 'organizationId is required' });
+    }
+
+    const config = await db
+      .select({
+        provider: telephonyConfig.provider,
+        livekitOutboundTrunkId: telephonyConfig.livekitOutboundTrunkId,
+        customSipHost: telephonyConfig.customSipHost,
+        customSipNumbers: telephonyConfig.customSipNumbers,
+      })
+      .from(telephonyConfig)
+      .where(eq(telephonyConfig.organizationId, organizationId))
+      .limit(1);
+
+    if (config.length === 0) {
+      return res.status(404).json({ error: 'No telephony config found for organization' });
+    }
+
+    res.json({
+      provider: config[0].provider,
+      livekitOutboundTrunkId: config[0].livekitOutboundTrunkId,
+      customSipHost: config[0].customSipHost,
+      customSipNumbers: config[0].customSipNumbers || [],
+    });
+  } catch (error: any) {
+    console.error('Error fetching telephony config for IVR agent:', error?.message || error);
+    res.status(500).json({ error: 'Failed to fetch telephony config' });
+  }
+});
+
 app.use('/api/ivr-verify', publicIvrRouter);
 
 // Webhook routes (no auth - verified by provider signatures)

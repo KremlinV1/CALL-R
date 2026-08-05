@@ -538,4 +538,23 @@ router.post('/session/end', async (req: AuthRequest, res: Response) => {
   }
 });
 
+// POST /api/ivr/session/transfer - Transfer the active call to a live agent
+// Works with SkyTelecom / Custom SIP / platform LiveKit trunk.
+router.post('/session/transfer', async (req: AuthRequest, res: Response) => {
+  try {
+    const { roomName, participantIdentity, transferTo } = req.body;
+
+    if (!roomName || !participantIdentity || !transferTo) {
+      return res.status(400).json({ error: 'Missing required fields: roomName, participantIdentity, transferTo' });
+    }
+
+    await ivrService.executeTransfer(roomName, participantIdentity, transferTo);
+
+    res.json({ success: true, transferTo });
+  } catch (error: any) {
+    console.error('Error transferring IVR call:', error);
+    res.status(500).json({ error: `Failed to transfer call: ${error?.message || 'unknown error'}` });
+  }
+});
+
 export default router;

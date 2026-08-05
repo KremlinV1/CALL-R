@@ -179,7 +179,7 @@ class PONELineAgent(Agent):
             tts = cartesia.TTS(voice=self.config.voice_id, streaming=True)
         elif ELEVENLABS_API_KEY and ELEVENLABS_API_KEY != "your_elevenlabs_key":
             tts = elevenlabs.TTS(
-                voice_id="21m00Tcm4TlvDq8ikWAM",
+                voice_id="EXAVITQu4vr4xnSDxMaL",
                 model="eleven_flash_v2_5",
                 voice_settings=elevenlabs.VoiceSettings(
                     stability=0.5,
