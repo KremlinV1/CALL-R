@@ -1,0 +1,14 @@
+{
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "agents/Dockerfile",
+    "watchPatterns": [
+      "agents/**"
+    ]
+  },
+  "deploy": {
+    "startCommand": "python bank_ivr_agent.py start",
+    "restartPolicyType": "ON_FAILURE",
+    "restartMaxRetries": 3
+  }
+}
