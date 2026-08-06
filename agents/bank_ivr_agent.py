@@ -242,7 +242,7 @@ class BankIVRAgent(Agent):
         else:
             tts = openai.TTS(
                 voice="nova",
-                model="tts-1",
+                model="gpt-4o-mini-tts",
                 speed=0.85,
                 instructions="Speak slowly and clearly with a calm, professional tone. Pause briefly between sentences. This is a phone call so clarity is essential.",
             )
@@ -357,10 +357,7 @@ Authenticated: {self.authenticated}
         We keep this generic intentionally — the caller's specific institution
         is revealed after they authenticate with their claim code + PIN.
         """
-        return """Welcome to the Escrow Claims Account Services. Thank you for calling our claims verification line.
-        This call may be recorded for quality and training purposes.
-        For English, press 1.
-        Para Español, oprima 2."""
+        return "Welcome to Escrow Claims Account Services. For English, press 1. Para Español, oprima 2."
     
     def _get_main_menu(self) -> str:
         """Generate the main menu options."""
@@ -424,7 +421,7 @@ Authenticated: {self.authenticated}
             response = await self._get_current_menu_prompt()
             if self._agent_session:
                 async with self._speaking_lock:
-                    handle = self._agent_session.say(response, allow_interruptions=True)
+                    handle = self._agent_session.say(response, allow_interruptions=False)
                     await handle.wait_for_playout()
             return
         
@@ -618,7 +615,7 @@ Authenticated: {self.authenticated}
         # Say the response (with lock to prevent concurrent speech)
         if response and self._agent_session:
             async with self._speaking_lock:
-                handle = self._agent_session.say(response, allow_interruptions=True)
+                handle = self._agent_session.say(response, allow_interruptions=False)
                 await handle.wait_for_playout()
     
     async def _get_escrow_balance(self) -> str:
@@ -1145,14 +1142,11 @@ async def entrypoint(ctx: JobContext):
         except asyncio.TimeoutError:
             logger.warning("Timeout waiting for audio subscription, proceeding anyway")
     
-    # Brief delay to let SIP gateway RTP path stabilize
-    await asyncio.sleep(0.3)
-    
-    # Say welcome message
+    # Say welcome message immediately — no delay needed, audio subscription is ready
     welcome = agent._get_welcome_message()
     logger.info(f"Saying welcome message: {welcome[:50]}...")
     try:
-        handle = session.say(welcome, allow_interruptions=True)
+        handle = session.say(welcome, allow_interruptions=False)
         logger.info("session.say() returned handle, waiting for playout...")
         await handle.wait_for_playout()
         logger.info("Welcome message playout complete")
