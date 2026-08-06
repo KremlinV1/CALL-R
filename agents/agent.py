@@ -180,14 +180,14 @@ class PONELineAgent(Agent):
         elif ELEVENLABS_API_KEY and ELEVENLABS_API_KEY != "your_elevenlabs_key":
             tts = elevenlabs.TTS(
                 voice_id="EXAVITQu4vr4xnSDxMaL",
-                model="eleven_flash_v2_5",
+                model="eleven_turbo_v2_5",
                 voice_settings=elevenlabs.VoiceSettings(
                     stability=0.5,
                     similarity_boost=0.75,
                     use_speaker_boost=True,
-                    speed=1.0,
+                    speed=0.85,
                 ),
-                streaming_latency=0,
+                streaming_latency=1,
             )
         else:
             tts = openai.TTS(voice="alloy", model="tts-1")
