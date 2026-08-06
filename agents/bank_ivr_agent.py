@@ -327,7 +327,7 @@ CRITICAL: When asked about the escrow balance or amount, always state ${amount_d
         else:
             claim_info = ""
 
-        self.instructions = f"""You are the automated voice system for {self.institution_name}. You are a professional, secure, and authoritative escrow claims assistant.
+        self.update_instructions(f"""You are the automated voice system for {self.institution_name}. You are a professional, secure, and authoritative escrow claims assistant.
 
 CRITICAL RULES:
 1. You are an IVR (Interactive Voice Response) system - be concise, clear, and official-sounding
