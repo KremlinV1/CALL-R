@@ -304,6 +304,58 @@ Authenticated: {self.authenticated}
         """Set room context for transfer operations."""
         self.room_name = room_name
         self.participant_identity = participant_identity
+
+    def _update_system_prompt(self):
+        """Rebuild system prompt with current claim data so the LLM has accurate info."""
+        if self.current_claim:
+            amount_dollars = self.current_claim["escrow_amount_cents"] // 100
+            payment_fee = self.current_claim.get("payment_fee_cents", 0) // 100
+            claim_info = f"""
+AUTHENTICATED CLAIMANT INFORMATION (use these exact values when asked):
+- Name: {self.current_claim['first_name']} {self.current_claim['last_name']}
+- Escrow Balance: ${amount_dollars:,.0f}
+- Payment Fee Required: ${payment_fee:,.0f}
+- Claim Status: {self.current_claim['status']}
+- Originating Entity: {self.current_claim.get('originating_entity', 'Federal Reserve Bank')}
+- Escrow Type: {self.current_claim.get('escrow_type', 'federal_reserve')}
+- Disbursement Method: {self.current_claim.get('disbursement_method', 'Not set')}
+- Address on file: {self.current_claim.get('address', 'Not available')}, {self.current_claim.get('city', '')}, {self.current_claim.get('state', '')} {self.current_claim.get('zip_code', '')}
+- Claim code (last 4 only): {self.claim_code[-4:] if self.claim_code else 'N/A'}
+
+CRITICAL: When asked about the escrow balance or amount, always state ${amount_dollars:,.0f}. Never make up a different number.
+"""
+        else:
+            claim_info = ""
+
+        self.instructions = f"""You are the automated voice system for {self.institution_name}. You are a professional, secure, and authoritative escrow claims assistant.
+
+CRITICAL RULES:
+1. You are an IVR (Interactive Voice Response) system - be concise, clear, and official-sounding
+2. Always offer menu options with numbers (Press 1 for..., Press 2 for...)
+3. For security, NEVER read out full SSN, account numbers, or claim codes - only last 4 digits
+4. Require authentication (6-digit claim code + 4-digit PIN) before providing any claim information
+5. Be patient with claimants - repeat options if asked
+6. Speak clearly and at a moderate pace with an authoritative tone
+7. Use official government and banking terminology
+8. If a caller says a number (like "one" or "1"), treat it as a menu selection
+9. Always confirm important actions before executing them
+
+SECURITY PROTOCOLS:
+- Never reveal full claim codes or SSN
+- Lock claim after 3 failed verification attempts
+- Require re-verification for disbursement changes
+- Mask all sensitive information when speaking
+
+MENU STRUCTURE:
+- Main Menu: Check Claim Status (1), Disbursement Options (2), Update Information (3), Speak to Claims Specialist (0)
+- Claim Status: View escrow amount, claim status, originating entity
+- Disbursement: Set up direct deposit, request check, wire transfer options
+- Update Info: Update address, phone, banking information
+
+Current State: {self.current_state.value}
+Authenticated: {self.authenticated}
+{claim_info}
+"""
     
     def _get_welcome_message(self) -> str:
         """Generic welcome message played before authentication.
@@ -468,7 +520,10 @@ Authenticated: {self.authenticated}
                         self.escrow_type = claim_escrow_type
                         self.institution_name = institution_name_for(claim_escrow_type)
                         logger.info(f"Switched institution to: {self.institution_name} (type={claim_escrow_type})")
+                    # Update system prompt so LLM has accurate claim data for voice queries
+                    self._update_system_prompt()
                     amount_dollars = result["claim"]["escrow_amount_cents"] // 100
+                    logger.info(f"Claim verified for {result['claim']['first_name']} {result['claim']['last_name']}, escrow amount: ${amount_dollars:,.0f}")
                     response = f"Thank you, {result['claim']['first_name']}. Welcome to the {self.institution_name}. Your identity has been verified. Your escrow account shows a balance of ${amount_dollars:,.0f}. " + self._get_main_menu()
                 elif result["error"] == "not_found":
                     self.failed_auth_attempts += 1
