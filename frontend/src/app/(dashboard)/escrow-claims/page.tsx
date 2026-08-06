@@ -328,8 +328,8 @@ export default function EscrowClaimsPage() {
       city: claim.city || "",
       state: claim.state || "",
       zipCode: claim.zipCode || "",
-      escrowAmount: Math.floor(claim.escrowAmount / 100).toString(),
-      paymentFee: Math.floor((claim.paymentFeeCents || 0) / 100).toString(),
+      escrowAmount: claim.escrowAmount.toString(),
+      paymentFee: (claim.paymentFeeCents || 0).toString(),
       escrowType: claim.escrowType,
       escrowDescription: claim.escrowDescription || "",
       originatingEntity: claim.originatingEntity || "",
@@ -346,15 +346,14 @@ export default function EscrowClaimsPage() {
     toast.success(`${label} copied to clipboard`)
   }
 
-  const formatCurrency = (cents: number) => {
-    // Display whole dollars only — matches what the IVR speaks aloud.
-    // Use floor so the UI stays in sync with the agent's truncation.
+  const formatCurrency = (amount: number) => {
+    // Display whole dollars — amount is already in dollars (no cents)
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
       maximumFractionDigits: 0,
       minimumFractionDigits: 0,
-    }).format(Math.floor(cents / 100))
+    }).format(Math.floor(amount))
   }
 
   const claims = claimsData?.claims || []

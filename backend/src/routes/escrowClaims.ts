@@ -280,8 +280,8 @@ router.post('/', async (req: AuthRequest, res: Response) => {
         city: data.city || null,
         state: data.state || null,
         zipCode: data.zipCode || null,
-        escrowAmount: Math.round(data.escrowAmount * 100), // Convert to cents
-        paymentFeeCents: Math.round((data.paymentFee || 0) * 100),
+        escrowAmount: data.escrowAmount, // Store as dollars (no cents)
+        paymentFeeCents: data.paymentFee || 0,
         escrowType: data.escrowType,
         escrowDescription: data.escrowDescription || null,
         originatingEntity: data.originatingEntity || null,
@@ -382,8 +382,8 @@ router.put('/:id', async (req: AuthRequest, res: Response) => {
     if (data.city !== undefined) updateData.city = data.city || null;
     if (data.state !== undefined) updateData.state = data.state || null;
     if (data.zipCode !== undefined) updateData.zipCode = data.zipCode || null;
-    if (data.escrowAmount !== undefined) updateData.escrowAmount = Math.round(data.escrowAmount * 100);
-    if (data.paymentFee !== undefined) updateData.paymentFeeCents = Math.round(data.paymentFee * 100);
+    if (data.escrowAmount !== undefined) updateData.escrowAmount = data.escrowAmount;
+    if (data.paymentFee !== undefined) updateData.paymentFeeCents = data.paymentFee;
     if (data.escrowType !== undefined) updateData.escrowType = data.escrowType;
     if (data.escrowDescription !== undefined) updateData.escrowDescription = data.escrowDescription || null;
     if (data.originatingEntity !== undefined) updateData.originatingEntity = data.originatingEntity || null;

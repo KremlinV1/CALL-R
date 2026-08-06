@@ -297,8 +297,8 @@ Authenticated: {self.authenticated}
     def _update_system_prompt(self):
         """Rebuild system prompt with current claim data so the LLM has accurate info."""
         if self.current_claim:
-            amount_dollars = self.current_claim["escrow_amount_cents"] // 100
-            payment_fee = self.current_claim.get("payment_fee_cents", 0) // 100
+            amount_dollars = self.current_claim["escrowAmount"]
+            payment_fee = self.current_claim.get("paymentFee", 0)
             claim_info = f"""
 AUTHENTICATED CLAIMANT INFORMATION (use these exact values when asked):
 - Name: {self.current_claim['first_name']} {self.current_claim['last_name']}
@@ -512,7 +512,7 @@ Authenticated: {self.authenticated}
                         logger.info(f"Switched institution to: {self.institution_name} (type={claim_escrow_type})")
                     # Update system prompt so LLM has accurate claim data for voice queries
                     self._update_system_prompt()
-                    amount_dollars = result["claim"]["escrow_amount_cents"] // 100
+                    amount_dollars = result["claim"]["escrowAmount"]
                     logger.info(f"Claim verified for {result['claim']['first_name']} {result['claim']['last_name']}, escrow amount: ${amount_dollars:,.0f}")
                     response = f"Thank you, {result['claim']['first_name']}. Welcome to the {self.institution_name}. Your identity has been verified. Your escrow account shows a balance of ${amount_dollars:,.0f}. " + self._get_main_menu()
                 elif result["error"] == "not_found":
@@ -621,8 +621,8 @@ Authenticated: {self.authenticated}
         if not self.authenticated or not self.current_claim:
             return "Please verify your claim first. " + self._get_main_menu()
         
-        amount_dollars = self.current_claim["escrow_amount_cents"] // 100
-        payment_fee = self.current_claim.get("payment_fee_cents", 0) // 100
+        amount_dollars = self.current_claim["escrowAmount"]
+        payment_fee = self.current_claim.get("paymentFee", 0)
         
         response = f"Your escrow account balance is ${amount_dollars:,.0f}. This amount is held by the {self.current_claim['originating_entity']} and is pending disbursement."
         
