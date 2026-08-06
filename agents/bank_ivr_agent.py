@@ -224,6 +224,7 @@ class BankIVRAgent(Agent):
         self.dtmf_buffer = ""  # Buffer for multi-digit DTMF input
         self.awaiting_pin = False  # Flag for PIN entry mode
         self.awaiting_ssn = False  # Flag for SSN verification
+        self._speaking_lock = asyncio.Lock()  # Prevent concurrent session.say() calls
         
         # Initialize STT — Deepgram nova-2 is fastest for streaming telephony
         if DEEPGRAM_API_KEY and DEEPGRAM_API_KEY != "your_deepgram_key":
@@ -429,8 +430,9 @@ Authenticated: {self.authenticated}
             self.dtmf_buffer = ""
             response = await self._get_current_menu_prompt()
             if self._agent_session:
-                handle = self._agent_session.say(response, allow_interruptions=False)
-                await handle.wait_for_playout()
+                async with self._speaking_lock:
+                    handle = self._agent_session.say(response, allow_interruptions=True)
+                    await handle.wait_for_playout()
             return
         
         # For single-digit menu selections, process immediately
@@ -620,10 +622,11 @@ Authenticated: {self.authenticated}
             else:
                 response = "Invalid selection. " + self._get_update_info_menu()
         
-        # Say the response
+        # Say the response (with lock to prevent concurrent speech)
         if response and self._agent_session:
-            handle = self._agent_session.say(response, allow_interruptions=False)
-            await handle.wait_for_playout()
+            async with self._speaking_lock:
+                handle = self._agent_session.say(response, allow_interruptions=True)
+                await handle.wait_for_playout()
     
     async def _get_escrow_balance(self) -> str:
         """Get escrow balance for authenticated claimant."""
@@ -1156,7 +1159,7 @@ async def entrypoint(ctx: JobContext):
     welcome = agent._get_welcome_message()
     logger.info(f"Saying welcome message: {welcome[:50]}...")
     try:
-        handle = session.say(welcome, allow_interruptions=False)
+        handle = session.say(welcome, allow_interruptions=True)
         logger.info("session.say() returned handle, waiting for playout...")
         await handle.wait_for_playout()
         logger.info("Welcome message playout complete")
