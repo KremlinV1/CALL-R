@@ -179,7 +179,12 @@ class PONELineAgent(Agent):
         if CARTESIA_API_KEY and CARTESIA_API_KEY != "your_cartesia_key":
             tts = cartesia.TTS(voice=self.config.voice_id, streaming=True)
         else:
-            tts = openai.TTS(voice="alloy", model="tts-1")
+            tts = openai.TTS(
+                voice="alloy",
+                model="tts-1",
+                speed=0.85,
+                instructions="Speak slowly and clearly with a calm, professional tone. Pause briefly between sentences. This is a phone call so clarity is essential.",
+            )
         
         super().__init__(
             instructions=self.config.system_prompt,

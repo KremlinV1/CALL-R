@@ -240,7 +240,12 @@ class BankIVRAgent(Agent):
                 streaming=True,
             )
         else:
-            tts = openai.TTS(voice="nova", model="tts-1")
+            tts = openai.TTS(
+                voice="nova",
+                model="tts-1",
+                speed=0.85,
+                instructions="Speak slowly and clearly with a calm, professional tone. Pause briefly between sentences. This is a phone call so clarity is essential.",
+            )
         
         # Reuse pre-warmed VAD if available, otherwise load it
         vad = preloaded_vad
