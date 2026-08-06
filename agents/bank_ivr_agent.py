@@ -355,7 +355,7 @@ MENU STRUCTURE:
 Current State: {self.current_state.value}
 Authenticated: {self.authenticated}
 {claim_info}
-"""
+""")
     
     def _get_welcome_message(self) -> str:
         """Generic welcome message played before authentication.
