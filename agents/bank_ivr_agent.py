@@ -232,24 +232,12 @@ class BankIVRAgent(Agent):
         else:
             stt = openai.STT()
         
-        # Initialize TTS — Cartesia streams audio for lowest latency.
-        # OpenAI TTS as fallback (non-streaming, higher latency).
+        # Initialize TTS — OpenAI TTS is reliable and works on all plans.
+        # Cartesia/ElevenLabs can be enabled later with paid plans for lower latency.
         if CARTESIA_API_KEY and CARTESIA_API_KEY != "your_cartesia_key":
             tts = cartesia.TTS(
                 voice="c78e25cf-0dfe-447f-920a-dfca4f4f6c59",
                 streaming=True,
-            )
-        elif ELEVENLABS_API_KEY and ELEVENLABS_API_KEY != "your_elevenlabs_key":
-            tts = elevenlabs.TTS(
-                voice_id="EXAVITQu4vr4xnSDxMaL",
-                model="eleven_turbo_v2_5",
-                voice_settings=elevenlabs.VoiceSettings(
-                    stability=0.5,
-                    similarity_boost=0.75,
-                    use_speaker_boost=True,
-                    speed=0.85,
-                ),
-                streaming_latency=1,
             )
         else:
             tts = openai.TTS(voice="nova", model="tts-1")

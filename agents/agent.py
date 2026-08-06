@@ -175,20 +175,9 @@ class PONELineAgent(Agent):
             stt = openai.STT()
         
         # Use Cartesia for TTS if configured (streaming, lowest latency)
+        # Otherwise use OpenAI TTS (reliable, works on all plans)
         if CARTESIA_API_KEY and CARTESIA_API_KEY != "your_cartesia_key":
             tts = cartesia.TTS(voice=self.config.voice_id, streaming=True)
-        elif ELEVENLABS_API_KEY and ELEVENLABS_API_KEY != "your_elevenlabs_key":
-            tts = elevenlabs.TTS(
-                voice_id="EXAVITQu4vr4xnSDxMaL",
-                model="eleven_turbo_v2_5",
-                voice_settings=elevenlabs.VoiceSettings(
-                    stability=0.5,
-                    similarity_boost=0.75,
-                    use_speaker_boost=True,
-                    speed=0.85,
-                ),
-                streaming_latency=1,
-            )
         else:
             tts = openai.TTS(voice="alloy", model="tts-1")
         
